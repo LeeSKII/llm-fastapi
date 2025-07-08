@@ -1,7 +1,8 @@
 from langgraph.graph import StateGraph, START, END
-from typing import TypedDict
+from typing import TypedDict,Annotated
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage,SystemMessage
+from langchain_core.messages import HumanMessage,SystemMessage,AIMessage
+from langgraph.graph.message import add_messages
 import os
 
 from dotenv import load_dotenv
@@ -79,18 +80,19 @@ no_think
 
 # 定义 LangGraph 状态
 class State(TypedDict):
+    messages:Annotated[list,add_messages]
     content: str
     result:str
 
-# 节点1：根据主题生成内容
+# 节点1：LLM进行检查
 async def llm_audit(state: State) -> State:
-    response = await llm.ainvoke([SystemMessage(system_prompt),HumanMessage(state["content"])])
-    return {"result": response.content}
-
+    response = await llm.ainvoke([SystemMessage(system_prompt),*state["messages"]])
+    return {"result": response.content,'messages': [AIMessage(response.content)]}
 
 # 构建 LangGraph 工作流
 workflow = StateGraph(State)
 workflow.add_node("llm_audit", llm_audit)
+
 workflow.add_edge(START, "llm_audit")
 workflow.add_edge("llm_audit", END)
 
