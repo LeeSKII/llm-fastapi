@@ -8,6 +8,8 @@ import json
 import logging
 
 from ....utils.llm_graph import doc_audit_graph
+from ....utils.llm_graph import doc_rewrite_graph
+from ....utils.llm_graph import doc_standard_check_graph
 
 router = APIRouter()
 
@@ -38,7 +40,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 
 # HTTP 端点：流式返回节点更新 stream_mode="messages"模式只能返回节点中对messages属性的更新，不包含其他属性的更新
-@router.post("/astreammessage",tags=["doc"])
+@router.post("/audit/astreammessage",tags=["doc_audit"])
 async def stream_workflow(input_data: dict) -> StreamingResponse:
     messages = input_data.get("messages", "")
     async def stream_updates(messages: list) -> AsyncGenerator[str, None]:
@@ -64,12 +66,32 @@ async def stream_workflow(input_data: dict) -> StreamingResponse:
     )
 
 
-# 普通 HTTP 端点：返回最终结果
-@router.post("/arunmessage")
+# LLM审查
+@router.post("/audit/arunmessage",tags=["doc_audit"])
 async def run_workflow(input_data: dict):
     messages = input_data.get("messages", "")
     if not messages:
         return {"result": "Messages is empty"}
     logging.info(messages)
     result = await doc_audit_graph.graph.ainvoke({"messages": messages})
+    return result
+
+# LLM润色
+@router.post("/rewrite/arunmessage",tags=["doc_rewrite"])
+async def run_workflow(input_data: dict):
+    messages = input_data.get("messages", "")
+    if not messages:
+        return {"result": "Messages is empty"}
+    logging.info(messages)
+    result = await doc_rewrite_graph.graph.ainvoke({"messages": messages})
+    return result
+
+# LLM标准检查
+@router.post("/standard/arunmessage",tags=["doc_standard"])
+async def run_workflow(input_data: dict):
+    input_text = input_data.get("input_text", "")
+    if not input_text:
+        return {"result": "Input_text is empty"}
+    logging.info(input_text)
+    result = await doc_standard_check_graph.graph.ainvoke({"input_text": input_text})
     return result
