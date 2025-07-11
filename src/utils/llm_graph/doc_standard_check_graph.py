@@ -7,6 +7,8 @@ from typing import List
 from enum import Enum
 from langgraph.graph import StateGraph, END
 from typing import TypedDict, List
+from langchain_core.tools import tool
+from tavily import TavilyClient
 import os
 from dotenv import load_dotenv
 load_dotenv()
@@ -15,6 +17,9 @@ api_key = os.getenv("QWEN_API_KEY")
 base_url = os.getenv("SELF_HOST_URL")
 model_name = "qwen-plus-latest"
 model_name = "Qwen3-235B"
+# Initialize Tavily client
+tavily_api_key = os.getenv('TAVILY_API_KEY')
+tavily_client = TavilyClient(api_key=tavily_api_key)
 
 # Initialize the LLM
 llm = ChatOpenAI(
@@ -85,10 +90,13 @@ standard_prompt = """no_think,# 提取标准名称和标准号的提示词
 {query}
 """
 
-standard_check_prompt = """no_think,你是一个专业的标准检测分析助手，任务是识别提供的国家标准（GB）和行业标准（如JB、QB等）是否过期以及有效，根据提供的标准号、标准名称，并验证标准名称与标准号是否匹配。以下是具体要求：
+standard_check_prompt = """no_think,你是一个专业的标准检测分析助手，任务是识别提供的国家标准（GB）和行业标准（如JB、QB等）是否过期以及有效，根据提供的标准号、标准名称，并验证标准名称与标准号是否匹配。
+你可以使用提供的Tavily搜索工具来查询标准的有效性状态，优先使用搜索结果中的'answer'字段提供的信息。
+以下是具体要求：
 输入内容：接收包含标准号（如GB 12345-2018、JB/T 7890-2015等）、标准名称以及可能的发布日期文本。
 识别过期标准：
-检查标准号，结合你所知道的标准状态或有效性信息，判断标准是否过期。
+检查标准号，优先使用提供的websearch结果进行判断，重点关注其中answer字段。
+如果websearch结果无法判断标准有效性，结合你所知道的标准状态或有效性信息，判断标准是否有效。
 识别标准号和名称：
 识别标准号（如GB 12345-2018、JB/T 7890-2015）。
 识别标准名称（如《家用电器安全标准》、《机械设备技术规范》）。
@@ -105,6 +113,9 @@ standard_check_prompt = """no_think,你是一个专业的标准检测分析助�
 名称与标号是否匹配（是/否）
 原因（判断的依据和理由）
 {format_instructions}
+\n
+{web_search_content}
+\n
 {query}
 """
 
@@ -125,6 +136,20 @@ check_prompt = PromptTemplate(
     partial_variables={"format_instructions": check_parser.get_format_instructions()},
 )
 
+async def tavily_search(query: str):
+    """Search for information about a standard's validity status using Tavily."""
+    # 将同步的 tavily_client.search 运行在单独的线程中以避免阻塞
+    response = await asyncio.to_thread(
+        tavily_client.search,
+        query,
+        search_depth='advanced',
+        include_answer=True
+    )
+    return {
+        "answer": response.get('answer', ''),
+        "results": response.get('results', [])
+    }
+
 # Define Async Node Functions
 async def extract_standards(state: GraphState) -> GraphState:
     """Extract standards from input text asynchronously."""
@@ -133,11 +158,22 @@ async def extract_standards(state: GraphState) -> GraphState:
     result = await chain.ainvoke({"query": input_text})
     return {"extracted_standards": result, "check_results": state.get("check_results", [])}
 
+def route_tools(state:GraphState):
+    if isinstance(state, list):
+        ai_message = state[-1]
+    elif messages := state.get("messages", []):
+        ai_message = messages[-1]
+    if hasattr(ai_message,'tool_calls') and len(ai_message.tool_calls) > 0:
+        return "call_tool"
+    else:
+        return END
+
 async def check_single_standard(standard, chain, semaphore):
     """Check a single standard with semaphore to limit concurrency."""
     async with semaphore:
         query = f"name:{standard.name},code:{standard.code}"
-        result = await chain.ainvoke({"query": query})
+        web_search_result = await tavily_search(f"标准号:{standard.code} 当前是否有效")
+        result = await chain.ainvoke({"query": query,"web_search_content": web_search_result})
         return result
 
 async def check_standards_async(standards, chain):
@@ -153,6 +189,12 @@ async def check_standards_async(standards, chain):
 async def check_standards(state: GraphState) -> GraphState:
     """Check each extracted standard for validity and matching with max concurrency of 5."""
     standards = state["extracted_standards"].standards
+    # llm = ChatOpenAI(
+    #     model='deepseek-chat',
+    #     api_key=os.getenv("DEEPSEEK_API_KEY"),
+    #     base_url=os.getenv("DEEPSEEK_API_BASE_URL"),
+    #     temperature=0.01
+    # )
     chain = check_prompt | llm | check_parser
     check_results = await check_standards_async(standards, chain)
     return {"check_results": check_results}
