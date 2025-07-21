@@ -1,3 +1,4 @@
+from pyexpat.errors import messages
 import time
 from langgraph.graph import StateGraph, START, END
 from typing_extensions import TypedDict
@@ -32,19 +33,22 @@ class OverallState(TypedDict):
     query:str
     web_search:dict
     response:str
-    messages: list[AnyMessage]
+    messages: list[dict]
 
-def web_search(state: OverallState):
+def web_search(state: OverallState)-> OverallState:
     """网页搜索"""
     query = state['query']
+    messages = state.get("messages", [])
     search_result = tavily_client.search(query)
-    search_result_str = json.dumps(search_result['results'])
-    return {"web_search":search_result}
+    messages.append({"role":"user","content":f"no_think,搜索结果：{search_result['results']}，用户提问：{query}"})
+    # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
+    return {"web_search":search_result,"messages":messages}
 
 def assistant_node(state: OverallState) -> OverallState:
     """助手响应"""
-    ai_response = llm.invoke([HumanMessage(content=f"no_think，根据搜索背景知识{state['web_search']}，回答用户提出的问题：{state['query']}")])
-    return {"response":ai_response.content}
+    ai_response = llm.invoke(state["messages"])
+    messages = [*state["messages"],{"role":"assistant","content":ai_response.content}]
+    return {"response":ai_response.content,"messages":messages}
 
 # 创建图形
 workflow = StateGraph(OverallState)
