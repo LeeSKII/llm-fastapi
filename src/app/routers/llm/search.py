@@ -21,6 +21,9 @@ load_dotenv()
 api_key = os.getenv("QWEN_API_KEY")
 base_url = os.getenv("SELF_HOST_URL")
 model_name = "Qwen3-235B"
+
+base_url = os.getenv("QWEN_API_BASE_URL")
+model_name = "qwen-plus-latest"
 # Initialize Tavily client
 tavily_api_key = os.getenv('TAVILY_API_KEY')
 tavily_client = TavilyClient(api_key=tavily_api_key)
@@ -35,20 +38,24 @@ class OverallState(TypedDict):
     web_search:dict
     response:str
     messages: list[dict]
+    
+class WebSearchState(TypedDict):
+    query:str
+    messages:list[dict]
+    web_search:dict
 
-def web_search(state: OverallState)-> OverallState:
+def web_search(state: OverallState)-> WebSearchState:
     """网页搜索"""
     query = state['query']
     messages = state.get("messages", [])
     search_result = tavily_client.search(query)
-    messages.append({"role":"user","content":f"搜索结果：{search_result['results']}，用户提问：{query}"})
     # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
-    return {"web_search":search_result,"messages":messages}
+    return {"web_search":search_result['results'],"messages":messages}
 
-def assistant_node(state: OverallState) -> OverallState:
+def assistant_node(state: WebSearchState) -> OverallState:
     """助手响应"""
-    ai_response = llm.invoke([{'role':'system','content':system_prompt},*state["messages"]])
-    messages = [*state["messages"],{"role":"assistant","content":ai_response.content}]
+    ai_response = llm.invoke([{'role':'system','content':system_prompt},*state['messages'],{"role":"user","content":f"搜索结果：{state['web_search']}，用户提问：{state['query']}"}])
+    messages = [*state["messages"],{"role":"user","content":f"{state['query']}"},{"role":"assistant","content":ai_response.content}]
     return {"response":ai_response.content,"messages":messages}
 
 # 创建图形
@@ -82,6 +89,7 @@ async def run_workflow(query: str):
 @router.post("/stream", tags=["search"])
 async def run_workflow(input_data: dict):
     query = input_data.get("query", "")
+    messages = input_data.get("messages", [])
     
     if not query:
         # 使用HTTP异常更符合REST规范
@@ -92,7 +100,7 @@ async def run_workflow(input_data: dict):
             # 添加心跳机制 (每15秒发送空注释)
             last_sent = time.time()
             
-            async for chunk in app.astream({"query": query}, stream_mode=["updates","messages"]):
+            async for chunk in app.astream({"query": query,"messages":messages}, stream_mode=["updates","messages"]):
                 logging.info(f"Chunk: {chunk}")
                 mode,*_ = chunk
                 
@@ -103,12 +111,14 @@ async def run_workflow(input_data: dict):
                 
                 if mode == "updates":
                     mode,data = chunk
+                    node_name = list(data.keys())[0]
                     # 结构化响应数据
                     response = {
                         "mode": mode,
-                        "llm_token": data
+                        "node": node_name,
+                        "data": data[node_name]
                     }
-                    yield f"data: {json.dumps(response)}\n\n"
+                    yield f"event: updates\ndata: {json.dumps(response)}\n\n"
                     last_sent = time.time()
 
                 elif mode == "messages":
@@ -120,7 +130,7 @@ async def run_workflow(input_data: dict):
                         "llm_token": message_to_dict(llm_token),
                         "metadata": metadata
                     }
-                    yield f"data: {json.dumps(response)}\n\n"
+                    yield f"event: messages\ndata: {json.dumps(response)}\n\n"
                 
         except Exception as e:
               # 发送错误信息而不是直接断开

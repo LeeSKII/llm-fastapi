@@ -4,6 +4,7 @@
     "ainvoke",
     "arun",
     "astream",
-    "tavily"
+    "tavily",
+    "uvicorn"
   ]
 }

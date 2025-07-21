@@ -4,4 +4,4 @@ bunch of fastapi functions
 
 ## Development
 
-start service: `uvicorn src.app.main:app --reload`
+start service: `uv run uvicorn src.app.main:app --reload`
