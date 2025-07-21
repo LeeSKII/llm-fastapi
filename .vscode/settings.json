@@ -3,6 +3,7 @@
     "agno",
     "ainvoke",
     "arun",
-    "astream"
+    "astream",
+    "tavily"
   ]
 }
