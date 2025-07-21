@@ -27,6 +27,7 @@ tavily_client = TavilyClient(api_key=tavily_api_key)
 
 llm = ChatOpenAI(model=model_name, api_key=api_key, base_url=base_url, temperature=0.01)
 
+system_prompt = "你是一位老学究，回复时使用文言文，显得高级。no_think" 
 
 # 定义状态类
 class OverallState(TypedDict):
@@ -40,13 +41,13 @@ def web_search(state: OverallState)-> OverallState:
     query = state['query']
     messages = state.get("messages", [])
     search_result = tavily_client.search(query)
-    messages.append({"role":"user","content":f"no_think,搜索结果：{search_result['results']}，用户提问：{query}"})
+    messages.append({"role":"user","content":f"搜索结果：{search_result['results']}，用户提问：{query}"})
     # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
     return {"web_search":search_result,"messages":messages}
 
 def assistant_node(state: OverallState) -> OverallState:
     """助手响应"""
-    ai_response = llm.invoke(state["messages"])
+    ai_response = llm.invoke([{'role':'system','content':system_prompt},*state["messages"]])
     messages = [*state["messages"],{"role":"assistant","content":ai_response.content}]
     return {"response":ai_response.content,"messages":messages}
 
