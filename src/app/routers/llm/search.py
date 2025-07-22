@@ -1,4 +1,3 @@
-import stat
 import time
 from langgraph.graph import StateGraph, START, END
 from typing_extensions import TypedDict
@@ -6,11 +5,12 @@ from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage,AnyMessage,messages_to_dict,messages_from_dict,message_to_dict
 from langchain_core.prompts import PromptTemplate
 from langchain.output_parsers import PydanticOutputParser
+from operator import add
 from pydantic import BaseModel, Field
 from enum import Enum
 import os
 import logging
-from typing import AsyncGenerator, NotRequired
+from typing import AsyncGenerator, NotRequired,Annotated
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 import json
@@ -26,8 +26,8 @@ api_key = os.getenv("QWEN_API_KEY")
 base_url = os.getenv("SELF_HOST_URL")
 model_name = "Qwen3-235B"
 
-# base_url = os.getenv("QWEN_API_BASE_URL")
-# model_name = "qwen-plus-latest"
+base_url = os.getenv("QWEN_API_BASE_URL")
+model_name = "qwen-plus-latest"
 # Initialize Tavily client
 tavily_api_key = os.getenv('TAVILY_API_KEY')
 tavily_client = TavilyClient(api_key=tavily_api_key)
@@ -53,18 +53,30 @@ class WebSearchQuery(BaseModel):
     search_depth:SearchDepthEnum = Field(description="搜索的深度，枚举值：BASIC、ADVANCED")
     reason: str = Field(description="生成该搜索问题的原因")
     confidence: float = Field(description="关联度，评估生成的搜索问题和用户提问的关联度")
+    
+class EvaluateWebSearchResult(BaseModel):
+    is_sufficient: bool = Field(description="是否搜索到了足够的信息帮助用户回答")
+    followup_search_query:str = Field(default="",description="如果搜索结果不足以回答用户提问，进行进一步的搜索的问题")
+    search_depth:SearchDepthEnum = Field(default=SearchDepthEnum.BASIC,description="进行进一步的搜索的问题,搜索的深度，枚举值：BASIC、ADVANCED")
+    reason: str = Field(default="",description="生成该搜索问题的原因")
+    confidence: float = Field(description="置信度")
 
 # 定义状态类
 class OverallState(TypedDict):
     query:str
     web_search_query:str
     web_search_depth:str
-    web_search_results:dict
+    web_search_results:Annotated[list[str], add]
+    web_search_query_list:Annotated[list[str], add]
+    max_search_loop:int
+    search_loop:int
     response:str
     messages: list[dict]
     isNeedWebSearch: bool
     reason: str
     confidence: float
+    is_sufficient:bool
+    followup_search_query:str
 
 def analyze_need_web_search(state: OverallState)-> OverallState:
     """判断是否需要进行网页搜索"""
@@ -99,20 +111,36 @@ def generate_search_query(state: OverallState)-> OverallState:
 
     return {"web_search_query":model.query,"web_search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
-
 def web_search(state: OverallState)-> OverallState:
     """网页搜索"""
     query = state['web_search_query']
     search_depth = state['web_search_depth']
     messages = state.get("messages", [])
     search_result = tavily_client.search(query,search_depth=search_depth)
+    search_loop = state['search_loop']+1
     # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
-    return {"web_search_results":search_result['results'],"messages":messages}
+    return {"web_search_results":search_result['results'],"messages":messages,"search_loop":search_loop,"web_search_query_list":[query]}
+
+def evaluate_search_results(state: OverallState)-> OverallState:
+    """评估搜索结果,是否足够可以回答用户提问"""
+    current_search_results = state['web_search_results']
+    query = state['query']
+    web_search_query = state['web_search_query']
+    parser = PydanticOutputParser(pydantic_object=EvaluateWebSearchResult)
+    # 获取 JSON Schema 的格式化指令
+    format_instructions = parser.get_format_instructions()
+    prompt = f"根据用户的问题：\n{query},AI模型进行了关于：{web_search_query} 的相关搜索,这里包含了曾经的历史搜索关键字：{state['web_search_query_list']},这些历史关键字搜索到以下内容：{current_search_results}。现在需要你严格评估这些搜索结果是否可以帮助你做出回答，从而满足用户的需求，如果判断当前信息不足，即is_sufficient为false，那么必须要生成followup_search_query，注意生成的followup_search_query必须与历史搜索记录体现差异性，严禁使用同质化搜索关键字，这将导致搜索结果重复，造成严重的信息冗余后果。要求使用json结构化输出，严格遵循的schema：\n{format_instructions}"
+    
+    response = llm.invoke([{'role':'system','content':reply_system_prompt},{"role":"user","content":prompt}])
+
+    model = parser.parse(response.content)
+    
+    return {"is_sufficient":model.is_sufficient,"web_search_query":model.followup_search_query,"followup_search_query":model.followup_search_query,"search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
 def assistant_node(state: OverallState) -> OverallState:
     """助手响应"""
     if(state['isNeedWebSearch']):
-        send_messages = [{'role':'system','content':reply_system_prompt},*state['messages'],{"role":"user","content":f"搜索结果：{state['web_search_results']}，用户提问：{state['query']}"}]
+        send_messages = [{'role':'system','content':reply_system_prompt},*state['messages'],{"role":"user","content":f"用户提问：{state['query']}，然后系统根据该提问生成了不同角度的搜索关键字：{state['web_search_query_list']}，得到的搜索结果：{state['web_search_results']}，请根据以上信息，满足用户的需求。"}]
     else:
         send_messages = [{'role':'system','content':reply_system_prompt},*state['messages'],{"role":"user","content":f"{state['query']}"}]
 
@@ -124,6 +152,13 @@ def need_web_search(state: OverallState)->bool:
     """判断是否需要网页搜索"""
     return state['isNeedWebSearch']
 
+def need_next_search(state: OverallState)->OverallState:
+    """判断是否需要进行下一次搜索"""
+    if state["is_sufficient"] or state["search_loop"] >= state["max_search_loop"]:
+        return "assistant"
+    else:
+        return "web_search"
+
 # 创建图形
 workflow = StateGraph(OverallState)
 
@@ -131,6 +166,7 @@ workflow = StateGraph(OverallState)
 workflow.add_node("analyze_need_web_search", analyze_need_web_search)
 workflow.add_node("generate_search_query", generate_search_query)
 workflow.add_node("web_search", web_search)
+workflow.add_node("evaluate_search_results", evaluate_search_results)
 workflow.add_node("assistant", assistant_node)
 
 
@@ -138,7 +174,8 @@ workflow.add_node("assistant", assistant_node)
 workflow.add_edge(START,"analyze_need_web_search")
 workflow.add_conditional_edges("analyze_need_web_search",need_web_search,{True: "generate_search_query", False: "assistant"})
 workflow.add_edge("generate_search_query","web_search")
-workflow.add_edge("web_search","assistant")
+workflow.add_edge("web_search","evaluate_search_results")
+workflow.add_conditional_edges("evaluate_search_results",need_next_search,["web_search","assistant"])
 workflow.add_edge("assistant",END)
 
 # 编译图形
@@ -164,9 +201,8 @@ class InputData(TypedDict):
 async def run_workflow_stream(input_data: InputData):
     query = input_data["query"]  # 必填字段直接访问
     messages = input_data.get("messages", [])
-
-    logging.info(f"Query: {query}")
-    logging.info(f"Messages: {messages}")
+    max_search_loop = 5  # 最大搜索次数
+    search_loop = 0  # 当前搜索次数
     
     if not query:
         # 使用HTTP异常更符合REST规范
@@ -177,7 +213,7 @@ async def run_workflow_stream(input_data: InputData):
             # 添加心跳机制 (每30秒发送空注释)
             last_sent = time.time()
             
-            async for chunk in app.astream({"query": query,"messages":messages}, stream_mode=["updates","messages"]):
+            async for chunk in app.astream({"query": query,"messages":messages,"max_search_loop":max_search_loop,"search_loop":search_loop}, stream_mode=["updates","messages"]):
                 logging.info(f"Chunk: {chunk}")
                 mode,*_ = chunk
                 
