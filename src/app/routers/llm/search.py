@@ -4,6 +4,7 @@ from typing_extensions import TypedDict
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage,AnyMessage,messages_to_dict,messages_from_dict,message_to_dict
 from langchain_core.prompts import PromptTemplate
+from langgraph.config import get_stream_writer
 from langchain.output_parsers import PydanticOutputParser
 from operator import add
 from pydantic import BaseModel, Field
@@ -216,8 +217,16 @@ class OverallState(TypedDict):
     is_sufficient: bool  # 搜索结果是否足够
     followup_search_query: str  # 后续搜索查询
 
+def custom_check_point_output(data:dict):
+    writer = get_stream_writer()  
+    writer(data) 
+
 def analyze_need_web_search(state: OverallState)-> OverallState:
     """判断是否需要进行网页搜索"""
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'analyze_need_web_search','data':{'message':"analyze_need_web_search is done",'hasStreamMessage':True,'status':'running'}})
+
     parser = PydanticOutputParser(pydantic_object=WebSearchJudgement)
     # 获取 JSON Schema 的格式化指令
     format_instructions = parser.get_format_instructions()
@@ -227,15 +236,22 @@ def analyze_need_web_search(state: OverallState)-> OverallState:
     try:
         response = llm.invoke([{'role':'system','content':system_prompt},*state['messages'],{"role":"user","content":prompt}])
         model = parser.parse(response.content)
-        logging.info(f"Parsed analyze_need_web_search model: {model}")
+        logging.info(f"Parsed analyze_need_web_search model: {model}")        
     except Exception as e:
         logging.error(f"分析是否需要网络搜索失败: {query}, 错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"分析是否需要网络搜索失败: {str(e)}")
+    
+    # 自定义输出信息
+    custom_check_point_output({'node':'analyze_need_web_search','data':{'message':"analyze_need_web_search is done",'hasStreamMessage':True,'status':'done'}})
 
     return {"query":state['query'],"messages":state['messages'],"isNeedWebSearch":model.isNeedWebSearch,"reason":model.reason,"confidence":model.confidence}
 
 def generate_search_query(state: OverallState)-> OverallState:
     """生成搜索查询"""
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'generate_search_query','data':{'message':"generate_search_query is running",'hasStreamMessage':True,'status':'running'}})
+
     query = state['query']
     messages = state.get("messages", [])
     parser = PydanticOutputParser(pydantic_object=WebSearchQuery)
@@ -246,14 +262,21 @@ def generate_search_query(state: OverallState)-> OverallState:
     try:
         response = llm.invoke([{'role':'system','content':system_prompt},*messages,{"role":"user","content":prompt}])
         model = parser.parse(response.content)
-        logging.info(f"Parsed generate_search_query model: {model}")
+        logging.info(f"Parsed generate_search_query model: {model}")   
     except Exception as e:
         logging.error(f"生成搜索查询失败: {query}, 错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"生成搜索查询失败: {str(e)}")
+    
+    # 自定义输出信息
+    custom_check_point_output({'node':'generate_search_query','data':{'message':"generate_search_query is done",'hasStreamMessage':True,'status':'done'}})
 
     return {"web_search_query":model.query,"web_search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
 def web_search(state: OverallState)-> OverallState:
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'web_search','data':{'message':"web_search is running",'hasStreamMessage':False,'status':'running'}})
+
     """网页搜索"""
     query = state['web_search_query']
     search_depth = state['web_search_depth']
@@ -267,11 +290,19 @@ def web_search(state: OverallState)-> OverallState:
         raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
     
     search_loop = state['search_loop']+1
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'web_search','data':{'message':"web_search is done",'hasStreamMessage':False,'status':'done'}})
+
     # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
     return {"web_search_results":search_result['results'],"messages":messages,"search_loop":search_loop,"web_search_query_list":[query]}
 
 def evaluate_search_results(state: OverallState)-> OverallState:
     """评估搜索结果,是否足够可以回答用户提问"""
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'evaluate_search_results','data':{'message':"evaluate_search_results is running",'hasStreamMessage':True,'status':'running'}})
+
     current_search_results = state['web_search_results']
     query = state['query']
     web_search_query = state['web_search_query']
@@ -283,15 +314,22 @@ def evaluate_search_results(state: OverallState)-> OverallState:
     try:
         response = llm.invoke([{'role':'system','content':system_prompt},{"role":"user","content":prompt}])
         model = parser.parse(response.content)
-        logging.info(f"Parsed evaluate_search_results model: {model}")
+        logging.info(f"Parsed evaluate_search_results model: {model}") 
     except Exception as e:
         logging.error(f"评估搜索结果失败: {query}, 错误: {str(e)}")
         raise HTTPException(status_code=500, detail=f"评估搜索结果失败: {str(e)}")
+    
+    # 自定义输出信息
+    custom_check_point_output({'node':'evaluate_search_results','data':{'message':"evaluate_search_results is done",'hasStreamMessage':True,'status':'done'}})
     
     return {"is_sufficient":model.is_sufficient,"web_search_query":model.followup_search_query,"followup_search_query":model.followup_search_query,"search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
 def assistant_node(state: OverallState) -> OverallState:
     """助手响应"""
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'assistant_node','data':{'message':"assistant_node is running",'hasStreamMessage':True,'status':'running'}})
+
     query = state['query']
     
     if(state['isNeedWebSearch']):
@@ -307,6 +345,10 @@ def assistant_node(state: OverallState) -> OverallState:
         raise HTTPException(status_code=500, detail=f"助手响应生成失败: {str(e)}")
     
     messages = [*state["messages"],{"role":"user","content":f"{state['query']}"},{"role":"assistant","content":ai_response.content}]
+
+    # 自定义输出信息
+    custom_check_point_output({'node':'assistant_node','data':{'message':"assistant_node is running",'hasStreamMessage':True,'status':'done'}})
+
     return {"response":ai_response.content,"messages":messages}
 
 def need_web_search(state: OverallState)->bool:
@@ -408,7 +450,7 @@ async def run_workflow_stream(input_data: InputData):
             # 添加心跳机制 (每30秒发送空注释)
             last_sent = time.time()
             
-            async for chunk in app.astream({"query": query,"messages":messages,"max_search_loop":max_search_loop,"search_loop":search_loop}, stream_mode=["updates","messages"]):
+            async for chunk in app.astream({"query": query,"messages":messages,"max_search_loop":max_search_loop,"search_loop":search_loop}, stream_mode=["updates","messages","custom"]):
                 logging.info(f"Chunk: {chunk}")
                 mode,*_ = chunk
                 
@@ -428,7 +470,6 @@ async def run_workflow_stream(input_data: InputData):
                     }
                     yield f"event: updates\ndata: {json.dumps(response)}\n\n"
                     last_sent = time.time()
-                    logging.info(f"发送更新: {node_name}")
 
                 elif mode == "messages":
                     mode,message_chunk = chunk
@@ -441,7 +482,19 @@ async def run_workflow_stream(input_data: InputData):
                         # "metadata": metadata
                     }
                     yield f"event: messages\ndata: {json.dumps(response)}\n\n"
-                    logging.info(f"发送消息: {llm_token.content[:50]}...")
+                    last_sent = time.time()
+                # 自定义消息用来显示当前正在运行的节点
+                elif mode == "custom":
+                    mode,data = chunk
+                    node_name = data['node']
+                    # 结构化响应数据
+                    response = {
+                        "mode": mode,
+                        "node": node_name,
+                        "data": data
+                    }
+                    yield f"event: custom\ndata: {json.dumps(response)}\n\n"
+                    last_sent = time.time()
                 
         except Exception as e:
             logging.error(f"流式传输错误: {query}, 错误: {str(e)}")
