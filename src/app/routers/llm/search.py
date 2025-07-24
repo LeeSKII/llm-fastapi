@@ -225,7 +225,8 @@ def analyze_need_web_search(state: OverallState)-> OverallState:
     """判断是否需要进行网页搜索"""
 
     # 自定义输出信息
-    custom_check_point_output({'node':'analyze_need_web_search','data':{'message':"analyze_need_web_search is done",'hasStreamMessage':True,'status':'running'}})
+    custom_check_point_output({'node':'analyze_need_web_search','type':'node_execute','data':{'message':"analyze_need_web_search is running",'status':'running'}})
+    custom_check_point_output({'node':'analyze_need_web_search','type':'update_stream_messages','data':{'message':"analyze_need_web_search is done",'status':'running'}})
 
     parser = PydanticOutputParser(pydantic_object=WebSearchJudgement)
     # 获取 JSON Schema 的格式化指令
@@ -242,7 +243,8 @@ def analyze_need_web_search(state: OverallState)-> OverallState:
         raise HTTPException(status_code=500, detail=f"分析是否需要网络搜索失败: {str(e)}")
     
     # 自定义输出信息
-    custom_check_point_output({'node':'analyze_need_web_search','data':{'message':"analyze_need_web_search is done",'hasStreamMessage':True,'status':'done'}})
+    custom_check_point_output({'node':'analyze_need_web_search','type':'update_stream_messages','data':{'message':"analyze_need_web_search is done",'status':'done'}})
+    custom_check_point_output({'node':'analyze_need_web_search','type':'node_execute','data':{'message':"analyze_need_web_search is running",'data':{"query":state['query'],"messages":state['messages'],"isNeedWebSearch":model.isNeedWebSearch,"reason":model.reason,"confidence":model.confidence},'status':'done'}})
 
     return {"query":state['query'],"messages":state['messages'],"isNeedWebSearch":model.isNeedWebSearch,"reason":model.reason,"confidence":model.confidence}
 
@@ -250,7 +252,8 @@ def generate_search_query(state: OverallState)-> OverallState:
     """生成搜索查询"""
 
     # 自定义输出信息
-    custom_check_point_output({'node':'generate_search_query','data':{'message':"generate_search_query is running",'hasStreamMessage':True,'status':'running'}})
+    custom_check_point_output({'node':'generate_search_query','type':'node_execute','data':{'message':"generate_search_query is running",'status':'running'}})
+    custom_check_point_output({'node':'generate_search_query','type':'update_stream_messages','data':{'message':"generate_search_query is running",'status':'running'}})
 
     query = state['query']
     messages = state.get("messages", [])
@@ -268,14 +271,15 @@ def generate_search_query(state: OverallState)-> OverallState:
         raise HTTPException(status_code=500, detail=f"生成搜索查询失败: {str(e)}")
     
     # 自定义输出信息
-    custom_check_point_output({'node':'generate_search_query','data':{'message':"generate_search_query is done",'hasStreamMessage':True,'status':'done'}})
+    custom_check_point_output({'node':'generate_search_query','type':'update_stream_messages','data':{'message':"generate_search_query is done",'status':'done'}})
+    custom_check_point_output({'node':'generate_search_query','type':'node_execute','data':{'message':"generate_search_query is running",'data':{"web_search_query":model.query,"web_search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence},'status':'done'}})
 
     return {"web_search_query":model.query,"web_search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
 def web_search(state: OverallState)-> OverallState:
 
     # 自定义输出信息
-    custom_check_point_output({'node':'web_search','data':{'message':"web_search is running",'hasStreamMessage':False,'status':'running'}})
+    custom_check_point_output({'node':'web_search','type':'node_execute','data':{'message':"web_search is running",'status':'running'}})
 
     """网页搜索"""
     query = state['web_search_query']
@@ -292,7 +296,7 @@ def web_search(state: OverallState)-> OverallState:
     search_loop = state['search_loop']+1
 
     # 自定义输出信息
-    custom_check_point_output({'node':'web_search','data':{'message':"web_search is done",'hasStreamMessage':False,'status':'done'}})
+    custom_check_point_output({'node':'web_search','type':'node_execute','data':{'message':"web_search is done",'data':{"web_search_results":search_result['results']},'status':'done'}})
 
     # 如果这里包含了langchain提供的message类型，那么会直接触发message的流式更新动作
     return {"web_search_results":search_result['results'],"messages":messages,"search_loop":search_loop,"web_search_query_list":[query]}
@@ -301,7 +305,8 @@ def evaluate_search_results(state: OverallState)-> OverallState:
     """评估搜索结果,是否足够可以回答用户提问"""
 
     # 自定义输出信息
-    custom_check_point_output({'node':'evaluate_search_results','data':{'message':"evaluate_search_results is running",'hasStreamMessage':True,'status':'running'}})
+    custom_check_point_output({'node':'evaluate_search_results','type':'node_execute','data':{'message':"evaluate_search_results is running",'status':'running'}})
+    custom_check_point_output({'node':'evaluate_search_results','type':'update_stream_messages','data':{'message':"evaluate_search_results is running",'status':'running'}})
 
     current_search_results = state['web_search_results']
     query = state['query']
@@ -320,15 +325,17 @@ def evaluate_search_results(state: OverallState)-> OverallState:
         raise HTTPException(status_code=500, detail=f"评估搜索结果失败: {str(e)}")
     
     # 自定义输出信息
-    custom_check_point_output({'node':'evaluate_search_results','data':{'message':"evaluate_search_results is done",'hasStreamMessage':True,'status':'done'}})
-    
+    custom_check_point_output({'node':'evaluate_search_results','type':'update_stream_messages','data':{'message':"evaluate_search_results is done",'status':'done'}})
+    custom_check_point_output({'node':'evaluate_search_results','type':'node_execute','data':{'message':"evaluate_search_results is running",'data':{"is_sufficient":model.is_sufficient,"followup_search_query":model.followup_search_query,"search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence},'status':'done'}})
+
     return {"is_sufficient":model.is_sufficient,"web_search_query":model.followup_search_query,"followup_search_query":model.followup_search_query,"search_depth":model.search_depth,"reason":model.reason,"confidence":model.confidence}
 
 def assistant_node(state: OverallState) -> OverallState:
     """助手响应"""
 
     # 自定义输出信息
-    custom_check_point_output({'node':'assistant_node','data':{'message':"assistant_node is running",'hasStreamMessage':True,'status':'running'}})
+    custom_check_point_output({'node':'assistant_node','type':'node_execute','data':{'message':"assistant_node is running",'status':'running'}})
+    custom_check_point_output({'node':'assistant_node','type':'update_stream_messages','data':{'message':"assistant_node is running",'status':'running'}})
 
     query = state['query']
     
@@ -347,7 +354,10 @@ def assistant_node(state: OverallState) -> OverallState:
     messages = [*state["messages"],{"role":"user","content":f"{state['query']}"},{"role":"assistant","content":ai_response.content}]
 
     # 自定义输出信息
-    custom_check_point_output({'node':'assistant_node','data':{'message':"assistant_node is running",'hasStreamMessage':True,'status':'done'}})
+    custom_check_point_output({'node':'assistant_node','type':'update_stream_messages','data':{'message':"assistant_node is running",'status':'done'}})
+    # 输出最终的messages信息对
+    custom_check_point_output({'node':'assistant_node','type':'update_messages','data':{'messages':messages}})
+    custom_check_point_output({'node':'assistant_node','type':'node_execute','data':{'message':"assistant_node is running",'data':{"response":"Response generated successfully"},'status':'done'}})
 
     return {"response":ai_response.content,"messages":messages}
 
