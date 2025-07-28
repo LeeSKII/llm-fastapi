@@ -29,12 +29,12 @@ if not api_key:
     raise ValueError("QWEN_API_KEY 环境变量未设置")
 
 base_url = os.getenv("SELF_HOST_URL")
-base_url = os.getenv("QWEN_API_BASE_URL")
+# base_url = os.getenv("QWEN_API_BASE_URL")
 if not base_url:
     raise ValueError("SELF_HOST_URL 环境变量未设置")
 
 model_name = os.getenv("SEARCH_MODEL_NAME", "Qwen3-235B")
-model_name = "qwen-plus-latest"
+# model_name = "qwen-plus-latest"
 
 # Initialize Tavily client
 tavily_api_key = os.getenv('TAVILY_API_KEY')
