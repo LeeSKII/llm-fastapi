@@ -21,9 +21,6 @@ class Translation(BaseModel):
     input: str = Field(...,description="输入文本")
     reason: str = Field(...,description="翻译解释")
 
-
-target = "英文"
-
 parser = PydanticOutputParser(pydantic_object=Translation)
 format_instructions = parser.get_format_instructions()
 system_prompt = """你是一位专业且严谨的工程设计领域翻译专家，擅长将用户输入的任何目标语言翻译成目标语言{target}，请严格遵循输出的json格式{format_instructions}，按要求翻译每轮对话用户提供的输入。"""
@@ -38,42 +35,51 @@ class State(TypedDict):
 
 # 节点1：Qwen
 def llm_translation_qwen(state: State) -> State:
-    llm = ChatOpenAI(model="qwen-plus-latest",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-    llm_with_structured_output = llm.with_structured_output(Translation).with_retry(stop_after_attempt=3)
-    response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(target=state["target_language"],format_instructions=format_instructions)), HumanMessage(state["input"])])
-    return {"qwen_result": response}
+    try:
+      llm = ChatOpenAI(model="qwen-plus-latest",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
+      llm_with_structured_output = llm.with_structured_output(Translation).with_retry(stop_after_attempt=3)
+      response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(target=state["target_language"],format_instructions=format_instructions)), HumanMessage(state["input"])])
+      return {"qwen_result": response}
+    except Exception as e:
+        return {"qwen_result": Translation(text="千问模型调用失败，请检查服务是否正常",input=state["input"],reason=str(e))}
 
 # 节点2：Deepseek
 def llm_translation_deepseek(state: State) -> State:
-    llm = ChatOpenAI(model="deepseek-chat",api_key=deepseek_api_key,base_url=deepseek_base_url,temperature=0.01)
-    llm_with_structured_output = llm.with_structured_output(Translation,method="json_mode").with_retry(stop_after_attempt=3)
-    response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(target=state["target_language"],format_instructions=format_instructions)), HumanMessage(state["input"])])
-    return {"deepseek_result": response}
+    try:
+      llm = ChatOpenAI(model="deepseek-chat",api_key=deepseek_api_key,base_url=deepseek_base_url,temperature=0.01)
+      llm_with_structured_output = llm.with_structured_output(Translation,method="json_mode").with_retry(stop_after_attempt=3)
+      response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(target=state["target_language"],format_instructions=format_instructions)), HumanMessage(state["input"])])
+      return {"deepseek_result": response}
+    except Exception as e:
+        return {"deepseek_result": Translation(text="DeepSeek模型调用失败，请检查服务是否正常",input=state["input"],reason=str(e))}
 
 # 节点3：本地模型
 def llm_translation_local(state: State) -> State:
-    # 本地模型调用略有不同
-    client: OpenAI = OpenAI(
-        api_key="EMPTY",
-        base_url=local_base_url,
-    )
-    completion = client.chat.completions.create(
-        model="Qwen3-235B",
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt.format(target=state["target_language"],format_instructions=format_instructions),
-            },
-            {
-                "role": "user",
-                "content": state["input"],
-            }
-        ],
-        extra_body={"guided_json": Translation.model_json_schema()},
-    )
-    response = completion.choices[0].message.reasoning_content
-    translation = Translation.model_validate_json(response)
-    return {"local_result": translation}
+    try:
+      # 本地模型调用略有不同
+      client: OpenAI = OpenAI(
+          api_key="EMPTY",
+          base_url=local_base_url,
+      )
+      completion = client.chat.completions.create(
+          model="Qwen3-235B",
+          messages=[
+              {
+                  "role": "system",
+                  "content": system_prompt.format(target=state["target_language"],format_instructions=format_instructions),
+              },
+              {
+                  "role": "user",
+                  "content": state["input"],
+              }
+          ],
+          extra_body={"guided_json": Translation.model_json_schema()},
+      )
+      response = completion.choices[0].message.reasoning_content
+      translation = Translation.model_validate_json(response)
+      return {"local_result": translation}
+    except Exception as e:
+        return {"local_result": Translation(text="本地模型调用失败，请检查服务是否正常",input=state["input"],reason=str(e))}
 
 def summarize_translation(state: State) -> State:
     return {"summary": "翻译完成"}
