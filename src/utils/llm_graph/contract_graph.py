@@ -8,6 +8,7 @@ from langchain.output_parsers import PydanticOutputParser
 from openai import OpenAI
 import lancedb
 import pandas as pd
+import logging
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -47,18 +48,21 @@ class State(TypedDict):
 
 def generate_search_words(state: State) -> State:
     try:
+      logging.info(f"generate_search_words,开始进行合同处理：收到用户请求数据：{state}")
       llm = ChatOpenAI(model="qwen-plus",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
       llm_with_structured_output = llm.with_structured_output(SearchKeyWords).with_retry(stop_after_attempt=3)
       parser = PydanticOutputParser(pydantic_object=SearchKeyWords)
       format_instructions = parser.get_format_instructions()
       system_prompt = "你是一个合同查询的助手，用户提出的查询需求可能是关于某些项目的也可能是关于某些设备的，请将用户的查询分解成不同的查询关键字，你只能提取用户提供的查询关键字，这意味着你绝对禁止虚拟项目或者设备关键字，只能从用户的原始查询中提取，注意，你需要提取的是关键字，这个关键字用于执行SQL的精确搜索，所以一定要保持简洁，否则会导致严重的业务问题。需要按照提供的json格式进行输出：\n{format_instructions}\n"
       response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(format_instructions=format_instructions)),*state["messages"], HumanMessage(state["query"])])
+      logging.info(f"generate_search_words,生成查询关键字格式化输出：{response}")
       return {"meta_search_query_keyword": response}
     except Exception as e:
         return {"meta_search_query_keyword": SearchKeyWords(project_key_words=None,equipments_key_words=None),"error":"generate_search_words.\n"+str(e)}
     
 def vector_search(state: State)->State:
     try:
+       logging.info(f"vector_search,开始进行向量化查询：收到用户请求数据：{state}")
        if state["meta_search_query_keyword"].project_key_words is not None:
            df_list = []
            db = lancedb.connect(r"C:\Lee\work\contract\csv\v3\contract_full_lancedb") 
@@ -70,12 +74,14 @@ def vector_search(state: State)->State:
            search_results = pd.concat(df_list, ignore_index=True)
            # 根据组合列去重（保留第一个出现的值）
            final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
+           logging.info(f"vector_search,向量化查询结果：{final_df['contact_no', 'project_name'].to_dict(orient='records')}")
            return {"vector_search_contract": final_df}
     except Exception as e:
         return {"vector_search_contract": None,"error":"vector_search.\n"+str(e)}
     
 def keyword_search(state: State)->State:
     try:
+        logging.info(f"keyword_search,开始进行关键字查询：收到用户请求数据：{state}")
         df_list = []
         db = lancedb.connect(r"C:\Lee\work\contract\csv\v3\contract_full_lancedb") 
         table = db.open_table("contract_table")
@@ -88,7 +94,7 @@ def keyword_search(state: State)->State:
         search_results = pd.concat(df_list, ignore_index=True)
         # 根据组合列去重（保留第一个出现的值）
         final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
-           
+        logging.info(f"keyword_search,关键字查询结果：{final_df['contact_no', 'project_name'].to_dict(orient='records')}")   
         return {"keyword_search_contract": final_df}
     except Exception as e:
         return {"keyword_search_contract": None,"error":"keyword_search.\n"+str(e)}
@@ -98,7 +104,9 @@ def filter_contracts(state: State)->State:
     try:
         # 合并两个来源的df，排除重复数据
         final_df = pd.concat([state["vector_search_contract"],state["keyword_search_contract"]], ignore_index=True)
+        logging.info(f"filter_contracts,合并两项查询，条目数：{len(final_df)}")
         final_df = final_df.drop_duplicates(subset=['contact_no', 'project_name'])
+        logging.info(f"filter_contracts,取消重复数据，条目数：{len(final_df)}")
         # LLM过滤掉不属于有效查询范围的合同 TODO
         return {"filtered_contracts": final_df.to_dict(orient="records")}
     except Exception as e:
@@ -110,9 +118,11 @@ def generate_response(state: State)->State:
             contract_list = []
             for contract in state["filtered_contracts"]:
                 contract_list.append(f"合同元数据：{contract['contract_meta']}\n合同设计设备:{contract['equipment_table']}\n============\n")
+        logging.info(f"generate_response,最终参与合同筛选的合同数据：{contract_list}")
         system_prompt = f"请根据以下合同信息回答用户提出的问题，请注意，严格参考合同信息，严禁虚构任何消息：\n{contract_list}\n"
         llm = ChatOpenAI(model="qwen-plus",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
         response = llm.invoke([SystemMessage(system_prompt)],*state["messages"], HumanMessage(state["query"]))
+        logging.info(f"generate_response,最终回复：{response.content}")
         return {"response": response.content}
     except Exception as e:
         return {"response": None,"error":"generate_response.\n"+str(e)}
