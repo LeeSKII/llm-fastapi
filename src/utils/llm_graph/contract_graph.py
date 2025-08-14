@@ -159,7 +159,8 @@ def generate_response(state: State)->State:
         llm = ChatOpenAI(model="qwen-plus",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
         response = llm.invoke([SystemMessage(system_prompt),*state["messages"], HumanMessage(state["query"])])
         logging.info(f"generate_response,最终回复：{response.content}")
-        return {"response": response.content}
+        messages = [*state["messages"], {'role': 'user', 'content': state['query']},{'role': 'assistant', 'content': response.content}] 
+        return {"response": response.content,"messages": messages}
     except Exception as e:
         return {"response": None,"error":"generate_response.\n"+str(e)}
 
