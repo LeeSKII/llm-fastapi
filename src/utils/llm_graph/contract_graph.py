@@ -10,6 +10,11 @@ import lancedb
 import pandas as pd
 import logging
 
+import sys
+from pathlib import Path
+sys.path.append(str(Path(__file__).parent.parent.parent.parent))
+from src.utils import logger
+
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -76,6 +81,8 @@ def vector_search(state: State)->State:
            final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
            logging.info(f"vector_search,向量化查询结果：{final_df['contact_no', 'project_name'].to_dict(orient='records')}")
            return {"vector_search_contract": final_df}
+       else:
+            return {"vector_search_contract": None}
     except Exception as e:
         return {"vector_search_contract": None,"error":"vector_search.\n"+str(e)}
     
@@ -88,13 +95,15 @@ def keyword_search(state: State)->State:
         merged_list = (state["meta_search_query_keyword"].project_key_words or []) + (state["meta_search_query_keyword"].equipments_key_words or [])
         
         for word in merged_list:
+            logging.info(f"keyword_search,开始进行关键字查询：查询语句：doc LIKE '%{word}%'")
             search_like_results = table.search().where(f"doc LIKE '%{word}%'").limit(5).to_pandas()
+            logging.info(f"keyword_search,开始进行关键字查询：查询结果：{len(search_like_results)}")
             df_list.append(search_like_results)
 
         search_results = pd.concat(df_list, ignore_index=True)
         # 根据组合列去重（保留第一个出现的值）
         final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
-        logging.info(f"keyword_search,关键字查询结果：{final_df['contact_no', 'project_name'].to_dict(orient='records')}")   
+        logging.info(f"keyword_search,关键字查询结果：{final_df[['contact_no', 'project_name']].to_dict(orient='records')}")   
         return {"keyword_search_contract": final_df}
     except Exception as e:
         return {"keyword_search_contract": None,"error":"keyword_search.\n"+str(e)}
@@ -114,14 +123,14 @@ def filter_contracts(state: State)->State:
 
 def generate_response(state: State)->State:
     try:
-        if state["filtered_contracts"] is not None and len(state["filtered_contracts"]) > 0:
-            contract_list = []
+        contract_list = []
+        if state["filtered_contracts"] is not None and len(state["filtered_contracts"]) > 0:      
             for contract in state["filtered_contracts"]:
                 contract_list.append(f"合同元数据：{contract['contract_meta']}\n合同设计设备:{contract['equipment_table']}\n============\n")
         logging.info(f"generate_response,最终参与合同筛选的合同数据：{contract_list}")
         system_prompt = f"请根据以下合同信息回答用户提出的问题，请注意，严格参考合同信息，严禁虚构任何消息：\n{contract_list}\n"
         llm = ChatOpenAI(model="qwen-plus",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-        response = llm.invoke([SystemMessage(system_prompt)],*state["messages"], HumanMessage(state["query"]))
+        response = llm.invoke([SystemMessage(system_prompt),*state["messages"], HumanMessage(state["query"])])
         logging.info(f"generate_response,最终回复：{response.content}")
         return {"response": response.content}
     except Exception as e:
