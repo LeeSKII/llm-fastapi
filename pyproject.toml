@@ -8,10 +8,13 @@ dependencies = [
     "agno>=1.6.4",
     "apscheduler>=3.11.0",
     "fastapi>=0.115.13",
+    "lancedb>=0.24.2",
     "langchain>=0.3.26",
     "langchain-openai>=0.3.27",
     "langgraph>=0.5.1",
     "openai>=1.91.0",
+    "pandas>=2.3.1",
+    "pylance>=0.32.1",
     "tavily-python>=0.7.9",
     "uvicorn[standard]>=0.34.3",
 ]
