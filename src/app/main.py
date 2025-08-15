@@ -8,6 +8,7 @@ from .routers.llm import doc
 from .routers.llm import chat
 from .routers.llm import search
 from .routers.llm import translate
+from .routers.llm import contract
 from ..utils import logger
 
 app = FastAPI(lifespan=lifespan)
@@ -17,6 +18,7 @@ app.include_router(doc.router,prefix="/llm/doc")
 app.include_router(chat.router,prefix="/llm/chat")
 app.include_router(search.router,prefix="/llm/search")
 app.include_router(translate.router,prefix="/llm/translate")
+app.include_router(contract.router,prefix="/llm/contract")
 
 @app.get("/")
 def read_root():
