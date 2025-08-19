@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 import json
 from pydantic import BaseModel, Field
 import asyncio
+from pydantic.json import pydantic_encoder
 
 from ....utils.llm_graph import contract_graph as app
 
@@ -49,7 +50,7 @@ async def run_workflow_stream(input_data:ContractSearch,request: Request):
                     "query": query,"messages":messages
                     
                 }, 
-                stream_mode=["messages", "updates", "custom"]
+                stream_mode=["messages", "custom"]
             ):
                 # --- 在循环开始时主动检查连接状态 ---
                 if await req.is_disconnected():
@@ -63,20 +64,8 @@ async def run_workflow_stream(input_data:ContractSearch,request: Request):
                 if time.time() - last_sent > heartbeat_interval:
                     yield ":keep-alive\n\n"
                     last_sent = time.time()
-                
-                if mode == "updates":
-                    mode, data = chunk
-                    node_name = list(data.keys())[0]
-                    # 结构化响应数据
-                    response = {
-                        "mode": mode,
-                        "node": node_name,
-                        "data": data[node_name]
-                    }
-                    yield f"event: updates\ndata: {json.dumps(response)}\n\n"
-                    last_sent = time.time()
-                
-                elif mode == "messages":
+                 
+                if mode == "messages":
                     mode, message_chunk = chunk
                     llm_token, metadata = message_chunk
                     # 结构化响应数据
@@ -85,6 +74,8 @@ async def run_workflow_stream(input_data:ContractSearch,request: Request):
                         "node": metadata.get('langgraph_node', ""),
                         "data": message_to_dict(llm_token),
                     }
+                    if metadata.get('langgraph_node', "") != "generate_response":
+                        continue # 跳过非响应节点的消息
                     yield f"event: messages\ndata: {json.dumps(response)}\n\n"
                     last_sent = time.time()
                 
@@ -98,7 +89,7 @@ async def run_workflow_stream(input_data:ContractSearch,request: Request):
                         "node": node_name,
                         "data": data
                     }
-                    yield f"event: custom\ndata: {json.dumps(response)}\n\n"
+                    yield f"event: custom\ndata: {json.dumps(response, default=pydantic_encoder)}\n\n"
                     last_sent = time.time()
             
         except asyncio.CancelledError:
