@@ -1,5 +1,6 @@
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import Send
+from langgraph.config import get_stream_writer
 from typing import TypedDict,Annotated,List,Optional,Any
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage,SystemMessage
@@ -39,6 +40,16 @@ def get_embedding(text,model='text-embedding-v4',dimensions=2048):
     
     return completion.data[0].embedding
 
+def custom_check_point_output(data: dict):
+    """
+    自定义检查点输出函数
+    
+    Args:
+        data (dict): 要输出的数据
+    """
+    writer = get_stream_writer()  
+    writer(data) 
+
 class SearchKeyWords(BaseModel):
     project_key_words:Optional[List[str]]=Field(None,description="项目关键词")
     equipments_key_words:Optional[List[str]]=Field(None,description="设备关键词")
@@ -73,6 +84,7 @@ def generate_search_words(state: State) -> State:
       需要按照提供的json格式进行输出：\n{format_instructions}\n""")
       response = llm_with_structured_output.invoke([SystemMessage(system_prompt.format(format_instructions=format_instructions)),*state["messages"], HumanMessage(state["query"])])
       logging.info(f"generate_search_words,生成查询关键字格式化输出：{response}")
+      custom_check_point_output({'type':'update_info','node':'generate_search_words','data':response})
       return {"meta_search_query_keyword": response}
     except Exception as e:
         return {"meta_search_query_keyword": SearchKeyWords(project_key_words=None,equipments_key_words=None),"error":"generate_search_words.\n"+str(e)}
@@ -136,6 +148,7 @@ def continue_check_contract_belong(state: State):
     '''检查合同是否属于用户查询范围'''
     return [Send("check_contract_belong", {"query": state["query"], "contract_meta": s["contract_meta"], "equipment_table": s["equipment_table"]}) for s in state['filtered_contracts']]
 
+# TODO: 关键字查询的结果不需要再次check，只需要检查向量化查询的数据
 def check_contract_belong(state: dict)->State:
     '''检查合同是否属于用户查询范围'''
     query = state["query"]
@@ -155,11 +168,13 @@ def generate_response(state: State)->State:
     try:
         contract_list = state["contract_info_checked"]
         logging.info(f"generate_response,最终参与合同筛选的合同数据：{contract_list}")
+        custom_check_point_output({'type':'update_info','node':'generate_response','data':contract_list})
         system_prompt = f"请根据以下合同信息回答用户提出的问题，请注意，严格参考合同信息，尽量不要遗漏提供的合同信息，因为这些合同已经由上游检测程序校准过，确认属于用户的询问范围，严禁虚构任何消息：\n{contract_list}\n"
         llm = ChatOpenAI(model="qwen-plus",api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
         response = llm.invoke([SystemMessage(system_prompt),*state["messages"], HumanMessage(state["query"])])
         logging.info(f"generate_response,最终回复：{response.content}")
         messages = [*state["messages"], {'role': 'user', 'content': state['query']},{'role': 'assistant', 'content': response.content}] 
+        custom_check_point_output({'type':'final_response','node':'generate_response','data':{"response": response.content,"messages": messages}})
         return {"response": response.content,"messages": messages}
     except Exception as e:
         return {"response": None,"error":"generate_response.\n"+str(e)}
