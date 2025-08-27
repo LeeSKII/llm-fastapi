@@ -115,7 +115,7 @@ def keyword_search(state: State)->State:
     try:
         logging.info(f"keyword_search,开始进行关键字查询：收到用户请求数据：{state}")
         df_list = []
-        db = lancedb.connect(r"C:\Lee\work\contract\csv\v3\contract_full_lancedb") 
+        db = lancedb.connect(contract_db_path) 
         table = db.open_table("contract_table")
         merged_list = (state["meta_search_query_keyword"].project_key_words or []) + (state["meta_search_query_keyword"].equipments_key_words or [])
         
