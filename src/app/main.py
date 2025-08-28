@@ -3,18 +3,11 @@ from typing import Union
 from fastapi import FastAPI
 
 from .scheduler.start import lifespan
-from .routers import reports
-from .routers.llm import doc
-from .routers.llm import chat
-from .routers.llm import search
-from .routers.llm import translate
-from .routers.llm import contract
-from .routers.llm import tech_report
+from .routers.llm import doc, chat, search, translate, contract, tech_report
 from ..utils import logger
 
 app = FastAPI(lifespan=lifespan)
 
-app.include_router(reports.router,prefix="/reports")
 app.include_router(doc.router,prefix="/llm/doc")
 app.include_router(chat.router,prefix="/llm/chat")
 app.include_router(search.router,prefix="/llm/search")
