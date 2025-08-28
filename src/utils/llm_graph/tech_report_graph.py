@@ -19,6 +19,9 @@ model_name = "qwen-plus"
 
 # 定义状态类
 class TechReportState(TypedDict):
+    report_id: str
+    report_year: str
+    error: str
     source: dict
     intermediate_source: list
     partial_source: list
@@ -27,15 +30,15 @@ class TechReportState(TypedDict):
     report: str
 
 # 获取科技报告数据的函数
-def get_report(id: str, year: str):
+def get_report(state: TechReportState):
     """根据id获取科技简报数据"""
     # 请求 URL
     url = "https://edb.cie-cn.com:8066/api/ext/attendanceMeal/getTechnologyBriefingWriting"
     # JSON 请求体
     json_data = {
         "key": tech_report_key,
-        "year": year,
-        "id": id
+        "year": state['report_year'],
+        "id": state['report_id'],
     }
 
     # 发送 POST 请求
@@ -47,11 +50,12 @@ def get_report(id: str, year: str):
 
     # 处理响应
     if response.status_code == 200:
-        result = response.json()
-        return result
+        report_data = response.json()
+        if report_data and 'data' in report_data:
+            return {"source": report_data['data']}
     else:
-        print(f"请求失败，状态码: {response.status_code}, 错误: {response.text}")
-        return None
+        error_msg = f"请求失败，状态码: {response.status_code}, 错误: {response.text}"
+        return {"error": error_msg}
 
 # 系统提示
 system_message = """**角色 (Role):**
@@ -165,12 +169,14 @@ def route_to_generate(state: TechReportState):
 
 # 构建工作流
 workflow = StateGraph(TechReportState)
+workflow.add_node("get_report_data",get_report)
 workflow.add_node("split_node", split_node)
 workflow.add_node("dispatch_node", dispatch_node)
 workflow.add_node("generate_report_node", generate_report_node)
 workflow.add_node("merge_node", merge_node)
 
-workflow.add_edge(START, "split_node")
+workflow.add_edge(START, "get_report_data")
+workflow.add_edge("get_report_data", "split_node")
 workflow.add_edge("split_node", "dispatch_node")
 workflow.add_conditional_edges("dispatch_node", route_to_generate)
 workflow.add_edge("generate_report_node", "merge_node")
@@ -181,8 +187,7 @@ graph = workflow.compile()
 
 if __name__ == "__main__":
     # 测试用例
-    report_data = get_report("21be02ed1bc94aa9a6bd1b36fb784295", "2025")
-    if report_data and 'data' in report_data:
-        state = {"source": report_data['data']}
-        result = graph.invoke(state)
-        print(result['report'])
+    state = {"report_id": "21be02ed1bc94aa9a6bd1b36fb784295", "report_year": "2025"}
+    result = graph.invoke(state)
+    print(result['report'])
+        
