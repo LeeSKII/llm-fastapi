@@ -3,7 +3,7 @@ module.exports = {
     {
       name: "fast-api-llm",
       script: "cmd.exe", //使用cmd运行
-      args: "/c uv run uvicorn src.app.main:app --host 0.0.0.0 --port 8504",
+      args: "/c uv run uvicorn src.app.main:app --host 0.0.0.0 --port 8504 --workers 4",
       env: {
         PYTHONUNBUFFERED: "1", // 实时日志输出
       },
