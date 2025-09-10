@@ -1,6 +1,6 @@
 import datetime
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send
+from langgraph.types import Send,Command
 from langgraph.config import get_stream_writer
 from typing import TypedDict,Annotated,List,Optional,Any
 from langchain_openai import ChatOpenAI
@@ -72,6 +72,7 @@ class State(TypedDict):
     keyword_search_contract:pd.DataFrame
     filtered_contracts: List[Any]
     contract_info_checked:Annotated[list[dict], operator.add]
+    contract_info_filtered:list[dict]
     need_year_condition: bool # 是否需要按照年份条件过滤
     need_equipment_condition: bool # 是否需要按照设备条件过滤
     advanced_filter_conditions: AdvancedSearchConditions # 高级过滤条件
@@ -240,23 +241,39 @@ def advanced_year_filter(state: State)->State:
     else:
         year_condition = state["advanced_filter_conditions"].year_condition
         if year_condition is not None:
-            year = state["advanced_filter_conditions"].year
-            condition = state["advanced_filter_conditions"].year_condition
-            if condition == "=":
-                contract_list = [c for c in contract_list if int(c['date'][:4]) == int(year)]
-            elif condition == ">":
-                contract_list = [c for c in contract_list if int(c['date'][:4]) > int(year)]
-            elif condition == "<":
-                contract_list = [c for c in contract_list if int(c['date'][:4]) < int(year)]
-            logging.info(f"advanced_year_filter,通过{year_condition}参与合同高级过滤的合同数据量：{len(contract_list)}")
-            logging.info(f"advanced_year_filter,参与合同高级过滤的合同数据：{contract_list}")
-            return {"contract_info_checked": contract_list}
+            year = int(state["advanced_filter_conditions"].year)
+            logging.info(f"advanced_year_filter,进入年份筛选year：{year}")
+            condition = year_condition
+            contract_result = []
+            for contract in contract_list:
+                contract_date = contract['date']
+                contract_year = int(contract_date[:4])
+                logging.info(f"advanced_year_filter,合同的日期：{contract_date}，年份：{contract_year}")
+                if condition == "=":
+                    if contract_year == year:
+                        contract_result.append(contract)
+                elif condition == ">":
+                    if contract_year >= year:
+                        contract_result.append(contract)
+                elif condition == "<":
+                    if contract_year <= year:
+                        contract_result.append(contract)
+            logging.info(f"advanced_year_filter,通过{year_condition}参与合同高级过滤的合同数据量：{len(contract_result)}")
+            logging.info(f"advanced_year_filter,参与合同高级过滤的合同数据：{contract_result}")
+            return {"contract_info_filtered": contract_result}
         else:
             return {}
 
 def advanced_equipment_filter(state: State)->State:
-    contract_list = state["contract_info_checked"]
+    contract_list = state["contract_info_filtered"]
     logging.info(f"advanced_equipment_filter,最终参与合同高级过滤的合同数据量：{len(contract_list)}")
+    if len(contract_list) == 0:
+        return Command(
+        # state update
+        update={"contract_info_filtered": None},
+        # control flow
+        goto="generate_response"
+    )
     if state["need_equipment_condition"] is False:
         return {}
     else:
@@ -338,7 +355,7 @@ graph = workflow.compile()
 
 if __name__ == "__main__":
     # 测试用例
-    query = "查询近三年的热电偶采购价格。"
+    query = "循环风机近三年的采购价格。"
     state = {"query": query,"messages":[]}
     result = graph.invoke(state)
     print(result)
