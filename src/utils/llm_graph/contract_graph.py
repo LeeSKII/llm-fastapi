@@ -63,17 +63,20 @@ class AdvancedSearchConditions(BaseModel):
     equipment: Optional[str] = Field(None,description="查询设备的名称关键字")
     equipment_condition: Optional[str] = Field(None,description="设备条件，枚举值，只能在['all','partial']两个中选择其中一个或者为None，None表示不进行设备查询，'all'表示需要查询所有设备，'partial'表示查询部分设备")
 
-    
+class CheckBelongContract(BaseModel):
+    reason: str = Field(...,description="判断合同属于查询范围原因")
+    judgement:bool = Field(...,description="查询合同是否属于该需求范围")
+
 # 定义 LangGraph 状态
 class State(TypedDict):
     query: str
     meta_search_query_keyword: SearchKeyWords
     # vector_search_contract:pd.DataFrame
     keyword_search_contract:pd.DataFrame
-    # filtered_contracts: List[Any]
-    # contract_info_checked:Annotated[list[dict], operator.add]
-    contract_info_checked:list[dict]
-    contract_info_filtered:list[dict]
+    contract_info_filtered: List[dict]
+    contract_info_checked:Annotated[list[dict], operator.add]
+    # contract_info_checked:list[dict]
+    keyword_search_contract_list:list[dict]
     need_year_condition: bool # 是否需要按照年份条件过滤
     need_equipment_condition: bool # 是否需要按照设备条件过滤
     advanced_filter_conditions: AdvancedSearchConditions # 高级过滤条件
@@ -171,7 +174,7 @@ def keyword_search(state: State)->State:
         # 根据组合列去重（保留第一个出现的值）
         final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
         logging.info(f"keyword_search,关键字查询结果：{final_df[['contact_no', 'project_name']].to_dict(orient='records')}")   
-        return {"keyword_search_contract": final_df,"contract_info_checked":final_df.to_dict(orient="records")}
+        return {"keyword_search_contract": final_df,"keyword_search_contract_list":final_df.to_dict(orient="records")}
     except Exception as e:
         return {"keyword_search_contract": None,"error":"keyword_search.\n"+str(e)}
 
@@ -189,17 +192,27 @@ def filter_contracts(state: State)->State:
     
 def continue_check_contract_belong(state: State):
     '''检查合同是否属于用户查询范围'''
-    return [Send("check_contract_belong", {"query": state["query"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in state['filtered_contracts']]
+    return [Send("check_contract_belong", {"query": state["query"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in state['keyword_search_contract_list']]
 
 def check_contract_belong(state: dict)->State:
     '''检查合同是否属于用户查询范围'''
     query = state["query"]
     contract_info = state['contract_meta']+state['equipment_table']
     try:
-        system_prompt = f"你是一个精确的合同查询判断机器，请根据用户提供的合同信息和用户提出的问题，判断合同是否属于用户查询范围，输出false表示不属于，true表示属于，记住，只需要输出true或false，不要输出其它任何信息。"
         llm = ChatOpenAI(model=MODEL_NAME,api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-        response = llm.invoke([SystemMessage(system_prompt), HumanMessage(f"用户提供的合同信息：{contract_info},\n用户提出的问题：{query}")])
-        if "true" in response.content.lower():
+        llm_with_structured_output = llm.with_structured_output(CheckBelongContract).with_retry(stop_after_attempt=3)
+        parser = PydanticOutputParser(pydantic_object=CheckBelongContract)
+        format_instructions = parser.get_format_instructions()
+        system_prompt = dedent(f"""你是一个精确的合同查询判断机器，请根据用户提供的合同信息和用户提出的问题，判断合同是否属于用户查询范围。
+                               # 分析规则
+                               1.如果用户的提问需求范围在提供的合同信息中，则认为合同属于用户的查询范围，例如用户询问某个项目的合同信息，如果该合同中属于该项目，那么先进行分析，检测到存在该项目的合同信息，输出true。
+                               # 输出格式为json
+                               reason中需要写出分析的原因，例如：合同属于该查询项目。
+                               judgement中需要写出判断结果。
+                               当前时间是：{datetime.datetime.now().strftime('%Y-%m-%d')}。
+                               需要按照提供的json格式进行输出：\n{format_instructions}\n""")
+        response:CheckBelongContract = llm_with_structured_output.invoke([SystemMessage(system_prompt), HumanMessage(f"用户提供的合同信息：{contract_info},\n用户提出的问题：{query}")])
+        if response.judgement is True:
             return {"contract_info_checked": [{"contract_meta":state['contract_meta'],"date":state['date'],"equipment_table":state['equipment_table']}]}
         else:
             return {"contract_info_checked": []}
@@ -330,7 +343,7 @@ workflow.add_node("generate_search_words", generate_search_words)
 workflow.add_node("keyword_search", keyword_search)
 # workflow.add_node("filter_contracts", filter_contracts)
 workflow.add_node("generate_response", generate_response)
-# workflow.add_node("check_contract_belong", check_contract_belong)
+workflow.add_node("check_contract_belong", check_contract_belong)
 workflow.add_node("advanced_filter_contracts", advanced_filter_contracts)
 workflow.add_node("advanced_year_filter", advanced_year_filter)
 workflow.add_node("advanced_equipment_filter", advanced_equipment_filter)
@@ -342,8 +355,10 @@ workflow.add_edge("generate_search_words", "keyword_search")
 # workflow.add_edge("vector_search", "filter_contracts")
 # workflow.add_edge("keyword_search", "filter_contracts")
 # workflow.add_conditional_edges("filter_contracts", continue_check_contract_belong)
-# workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
-workflow.add_edge("keyword_search", "advanced_filter_contracts")
+
+# workflow.add_edge("keyword_search", "advanced_filter_contracts")
+workflow.add_conditional_edges("keyword_search", continue_check_contract_belong)
+workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
 workflow.add_edge("advanced_filter_contracts", "advanced_year_filter")
 workflow.add_conditional_edges("advanced_year_filter", advanced_equipment_filter)
 workflow.add_edge("equipment_choice", "generate_response")
