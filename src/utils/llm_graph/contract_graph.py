@@ -26,7 +26,7 @@ load_dotenv()
 qwen_api_key = os.getenv("QWEN_API_KEY")
 qwen_base_url = os.getenv("QWEN_API_BASE_URL")
 contract_db_path = os.getenv("CONTRACT_DB_PATH")
-MODEL_NAME = "qwen-max"
+MODEL_NAME = "qwen-plus"
 
 def get_embedding(text,model='text-embedding-v4',dimensions=2048):
     client = OpenAI(
@@ -236,7 +236,7 @@ def advanced_year_filter(state: State)->State:
     contract_list = state["contract_info_checked"]
     logging.info(f"advanced_year_filter,最终参与合同高级过滤的合同数据量：{len(contract_list)}")
     if state["advanced_filter_conditions"].year is False:
-        return {}
+        return {"contract_info_filtered": contract_list}
     else:
         year_condition = state["advanced_filter_conditions"].year_condition
         if year_condition is not None:
@@ -252,16 +252,16 @@ def advanced_year_filter(state: State)->State:
                     if contract_year == year:
                         contract_result.append(contract)
                 elif condition == ">":
-                    if contract_year >= year:
+                    if contract_year > year:
                         contract_result.append(contract)
                 elif condition == "<":
-                    if contract_year <= year:
+                    if contract_year < year:
                         contract_result.append(contract)
             logging.info(f"advanced_year_filter,通过{year_condition}参与合同高级过滤的合同数据量：{len(contract_result)}")
             logging.info(f"advanced_year_filter,参与合同高级过滤的合同数据：{contract_result}")
             return {"contract_info_filtered": contract_result}
         else:
-            return {}
+            return {"contract_info_filtered": contract_list}
 
 def advanced_equipment_filter(state: State)->State:
     contract_list = state["contract_info_filtered"]
