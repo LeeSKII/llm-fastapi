@@ -26,7 +26,7 @@ load_dotenv()
 qwen_api_key = os.getenv("QWEN_API_KEY")
 qwen_base_url = os.getenv("QWEN_API_BASE_URL")
 contract_db_path = os.getenv("CONTRACT_DB_PATH")
-MODEL_NAME = "qwen-plus"
+MODEL_NAME = "qwen-max"
 
 def get_embedding(text,model='text-embedding-v4',dimensions=2048):
     client = OpenAI(
@@ -68,10 +68,11 @@ class AdvancedSearchConditions(BaseModel):
 class State(TypedDict):
     query: str
     meta_search_query_keyword: SearchKeyWords
-    vector_search_contract:pd.DataFrame
+    # vector_search_contract:pd.DataFrame
     keyword_search_contract:pd.DataFrame
-    filtered_contracts: List[Any]
-    contract_info_checked:Annotated[list[dict], operator.add]
+    # filtered_contracts: List[Any]
+    # contract_info_checked:Annotated[list[dict], operator.add]
+    contract_info_checked:list[dict]
     contract_info_filtered:list[dict]
     need_year_condition: bool # 是否需要按照年份条件过滤
     need_equipment_condition: bool # 是否需要按照设备条件过滤
@@ -170,12 +171,12 @@ def keyword_search(state: State)->State:
         # 根据组合列去重（保留第一个出现的值）
         final_df = search_results.drop_duplicates(subset=['contact_no', 'project_name'])
         logging.info(f"keyword_search,关键字查询结果：{final_df[['contact_no', 'project_name']].to_dict(orient='records')}")   
-        return {"keyword_search_contract": final_df}
+        return {"keyword_search_contract": final_df,"contract_info_checked":final_df.to_dict(orient="records")}
     except Exception as e:
         return {"keyword_search_contract": None,"error":"keyword_search.\n"+str(e)}
 
 def filter_contracts(state: State)->State:
-    '''进行合同的过滤处理'''
+    '''进行合同的过滤处理，abort'''
     try:
         # 合并两个来源的df，排除重复数据
         final_df = pd.concat([state["keyword_search_contract"],state["vector_search_contract"]], ignore_index=True)
@@ -209,8 +210,6 @@ def advanced_filter_contracts(state: State)->State:
     '''进行合同的额外过滤处理，例如查询指定的某种设备，就提取相关设备的数据，查询指定年份的就限定相关年份的数据'''
     try:
         query = state["query"]
-        contract_list = state["contract_info_checked"]
-        logging.info(f"advanced_filter_contracts,参与合同高级过滤的合同数据：{contract_list}")
         llm = ChatOpenAI(model=MODEL_NAME,api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
         llm_with_structured_output = llm.with_structured_output(AdvancedSearchConditions).with_retry(stop_after_attempt=3)
         parser = PydanticOutputParser(pydantic_object=AdvancedSearchConditions)
@@ -277,25 +276,25 @@ def advanced_equipment_filter(state: State)->State:
     if state["need_equipment_condition"] is False:
         return {}
     else:
-        return [Send("equipment_choice", {"query": state["query"],"condition":state["advanced_filter_conditions"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in contract_list]
+        return [Send("equipment_choice", {"query": state["query"],"search_keywords":state["meta_search_query_keyword"],"condition":state["advanced_filter_conditions"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in contract_list]
 
 def equipment_choice(state: dict)->State:
-    query = state["query"]
+    search_keywords = state["search_keywords"]
     logging.info(f"equipment_choice,正在精确识别待查找的合同设备数据，输入数据：{state}")
     if state['condition'].equipment_condition == "all":
         return {"contract_filtered_final":[{"contract_meta":state['contract_meta'],"date":state['date'],"equipment_table":state['equipment_table']}]}
     elif state['condition'].equipment_condition is None:
         return {"contract_filtered_final":[{"contract_meta":state['contract_meta'],"date":state['date'],"equipment_table":None}]}
     else:      
-        prompt = dedent(f"""你是一位合同设备分析机器人，你的任务是根据用户的提问，精确识别合同中所涉及的设备信息，包括可能涉及到的名称、规格型号、数量、价格等，并将其信息全部返回。
-                            请注意，严格参考合同的设备信息，禁止遗漏提供的设备信息，严禁虚构任何不属于上下文的消息。
+        prompt = dedent(f"""你是一位合同设备分析机器人，你的任务是根据提供的设备关键字，精确识别合同中所涉及的设备信息，包括可能涉及到的名称、规格型号、数量、价格等，并将其信息全部返回。
+                            请注意，严格参考合同的设备信息，禁止遗漏提供的设备信息，严禁虚构任何未提供的数据，你只能基于提供的设备信息范围进行回复。
                             设备信息：\n{state['equipment_table']}
                             请根据以下规则回答用户提问：
-                            1.如果提供的合同未包含用户询问的设备信息，则返回null;
-                            2.如果合同中除了用户提问的设备还包含了其它设备，则只返回用户提问的设备信息；
+                            1.如果提供的合同未包含提供的设备关键字，则返回null;
+                            2.如果合同中除了提供的设备关键字还包含了其它设备，则只返回涉及到提供的设备关键字的设备信息；
                             3.如果合同中没有任何设备信息，则返回null；
-                            4.如果合同中包含了用户提问的多个设备信息，则返回多个设备信息。
-                            请根据以下合同信息回答用户提出的问题：\n{query}\n
+                            4.如果合同中包含了多个设备关键字的多个设备信息，则将所有关键字提及的设备信息返回，禁止遗漏。
+                            请根据提供的设备关键字回复：\n{search_keywords.equipments_key_words}\n
                             回复规则：
                             你的回复只包含必要的结果信息，你是一台精确的执行机器，不需要提供任何其它无关的信息和格式例如```markdown```标记输出，使用Markdown格式回复。
                             """)
@@ -309,9 +308,9 @@ def generate_response(state: State)->State:
         contract_list = state["contract_filtered_final"]
         logging.info(f"generate_response,最终参与合同筛选的合同数据：{contract_list}")
         custom_check_point_output({'type':'update_info','node':'generate_response','data':contract_list})
-        system_prompt = dedent(f"""请根据以下合同信息回答用户提出的问题：\n{contract_list}\n
-                               请注意，严格参考合同信息，尽量不要遗漏提供的合同信息，因为这些合同已经由上游检测程序校准过，确认属于用户的询问范围。
-                               严禁虚构任何不属于上下文的消息:
+        system_prompt = dedent(f"""根据以下合同信息回答用户提出的问题：\n{contract_list}\n
+                               注意，严格参考合同信息，禁止遗漏提供的合同信息，必须根据提供的合同信息范围进行回答。
+                               严禁虚构任何未提供的数据:
                                1.如果提供的合同未覆盖用户到用户提问涉及的范围，例如查询某个项目或者设备的合同，提供的合同信息未找到该项目或者该设备，则必须显式声明该项目未查询到相关的合同信息或者未查询到相关设备合同信息;
                                当前时间是：{datetime.datetime.now().strftime('%Y-%m-%d')}。
                                不需要提供任何其它无关的信息和格式例如```markdown```标记输出，使用Markdown格式回复""")
@@ -327,23 +326,24 @@ def generate_response(state: State)->State:
 # 构建 LangGraph 工作流
 workflow = StateGraph(State)
 workflow.add_node("generate_search_words", generate_search_words)
-workflow.add_node("vector_search", vector_search)
+# workflow.add_node("vector_search", vector_search)
 workflow.add_node("keyword_search", keyword_search)
-workflow.add_node("filter_contracts", filter_contracts)
+# workflow.add_node("filter_contracts", filter_contracts)
 workflow.add_node("generate_response", generate_response)
-workflow.add_node("check_contract_belong", check_contract_belong)
+# workflow.add_node("check_contract_belong", check_contract_belong)
 workflow.add_node("advanced_filter_contracts", advanced_filter_contracts)
 workflow.add_node("advanced_year_filter", advanced_year_filter)
 workflow.add_node("advanced_equipment_filter", advanced_equipment_filter)
 workflow.add_node("equipment_choice",equipment_choice)
 
 workflow.add_edge(START, "generate_search_words")
-workflow.add_edge("generate_search_words", "vector_search")
+# workflow.add_edge("generate_search_words", "vector_search")
 workflow.add_edge("generate_search_words", "keyword_search")
-workflow.add_edge("vector_search", "filter_contracts")
-workflow.add_edge("keyword_search", "filter_contracts")
-workflow.add_conditional_edges("filter_contracts", continue_check_contract_belong)
-workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
+# workflow.add_edge("vector_search", "filter_contracts")
+# workflow.add_edge("keyword_search", "filter_contracts")
+# workflow.add_conditional_edges("filter_contracts", continue_check_contract_belong)
+# workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
+workflow.add_edge("keyword_search", "advanced_filter_contracts")
 workflow.add_edge("advanced_filter_contracts", "advanced_year_filter")
 workflow.add_conditional_edges("advanced_year_filter", advanced_equipment_filter)
 workflow.add_edge("equipment_choice", "generate_response")
@@ -355,7 +355,7 @@ graph = workflow.compile()
 
 if __name__ == "__main__":
     # 测试用例
-    query = "循环风机近三年的采购价格。"
+    query = "余热锅炉近三年的采购价格。"
     state = {"query": query,"messages":[]}
     result = graph.invoke(state)
     print(result)
