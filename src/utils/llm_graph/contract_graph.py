@@ -272,10 +272,10 @@ def advanced_year_filter(state: State)->State:
                     if contract_year == year:
                         contract_result.append(contract)
                 elif condition == ">":
-                    if contract_year > year:
+                    if contract_year >= year:
                         contract_result.append(contract)
                 elif condition == "<":
-                    if contract_year < year:
+                    if contract_year <= year:
                         contract_result.append(contract)
             logging.info(f"advanced_year_filter,通过{year_condition}参与合同高级过滤的合同数据量：{len(contract_result)}")
             logging.info(f"advanced_year_filter,参与合同高级过滤的合同数据：{contract_result}")
@@ -283,18 +283,18 @@ def advanced_year_filter(state: State)->State:
         else:
             return {"contract_info_filtered": contract_list}
 
+def routing_function(state: State)->State:
+    contract_list = state["contract_info_filtered"]
+    if len(contract_list) == 0:
+        return "END"
+    else:
+        return "NEXT"
+
 def advanced_equipment_filter(state: State)->State:
     contract_list = state["contract_info_filtered"]
     logging.info(f"advanced_equipment_filter,最终参与合同高级过滤的合同数据量：{len(contract_list)}")
-    if len(contract_list) == 0:
-        return Command(
-        # state update
-        update={"contract_info_filtered": None},
-        # control flow
-        goto="generate_response"
-    )
     if state["need_equipment_condition"] is False:
-        return {}
+        return {"contract_filtered_final": contract_list}
     else:
         return [Send("equipment_choice", {"query": state["query"],"search_keywords":state["meta_search_query_keyword"],"condition":state["advanced_filter_conditions"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in contract_list]
 
@@ -367,6 +367,7 @@ workflow.add_edge("generate_search_words", "keyword_search")
 workflow.add_conditional_edges("keyword_search", continue_check_contract_belong)
 workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
 workflow.add_edge("advanced_filter_contracts", "advanced_year_filter")
+workflow.add_conditional_edges("advanced_year_filter",routing_function, {"END": "generate_response", "NEXT": "advanced_equipment_filter"})
 workflow.add_conditional_edges("advanced_year_filter", advanced_equipment_filter)
 workflow.add_edge("equipment_choice", "generate_response")
 workflow.add_edge("generate_response", END)
