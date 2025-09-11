@@ -394,7 +394,7 @@ graph = workflow.compile()
 
 if __name__ == "__main__":
     # 测试用例
-    query = "余热锅炉近一年的采购价格。"
+    query = "安徽首大烧结余热锅炉近一年的采购价格。"
     state = {"query": query,"messages":[]}
     result = graph.invoke(state)
     print(result)
