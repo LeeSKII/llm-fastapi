@@ -290,13 +290,27 @@ def routing_function(state: State)->State:
     else:
         return "NEXT"
 
-def advanced_equipment_filter(state: State)->State:
+def has_enough_contract_filter_equipment(state: State)->State:
+    contract_list = state["contract_info_filtered"]
+    if state["need_equipment_condition"] is False:
+        return Command(
+            update={"contract_filtered_final": contract_list},
+            goto="generate_response"
+        )
+    else:
+        return Command(
+            update={"contract_filtered_final": contract_list},
+            goto="dispatch_equipment_node"
+        )
+
+def dispatch_equipment_node(state: State)->State:
+    return {}
+    
+def send_equipment_filter(state: State)->State:
     contract_list = state["contract_info_filtered"]
     logging.info(f"advanced_equipment_filter,最终参与合同高级过滤的合同数据量：{len(contract_list)}")
-    if state["need_equipment_condition"] is False:
-        return {"contract_filtered_final": contract_list}
-    else:
-        return [Send("equipment_choice", {"query": state["query"],"search_keywords":state["meta_search_query_keyword"],"condition":state["advanced_filter_conditions"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in contract_list]
+
+    return [Send("equipment_choice", {"query": state["query"],"search_keywords":state["meta_search_query_keyword"],"condition":state["advanced_filter_conditions"], "contract_meta": s["contract_meta"],"date":s['date'], "equipment_table": s["equipment_table"]}) for s in contract_list]
 
 def equipment_choice(state: dict)->State:
     search_keywords = state["search_keywords"]
@@ -352,8 +366,9 @@ workflow.add_node("keyword_search", keyword_search)
 workflow.add_node("generate_response", generate_response)
 workflow.add_node("check_contract_belong", check_contract_belong)
 workflow.add_node("advanced_filter_contracts", advanced_filter_contracts)
+workflow.add_node("has_enough_contract_filter_equipment", has_enough_contract_filter_equipment)
 workflow.add_node("advanced_year_filter", advanced_year_filter)
-workflow.add_node("advanced_equipment_filter", advanced_equipment_filter)
+workflow.add_node("dispatch_equipment_node", dispatch_equipment_node)
 workflow.add_node("equipment_choice",equipment_choice)
 
 workflow.add_edge(START, "generate_search_words")
@@ -367,8 +382,9 @@ workflow.add_edge("generate_search_words", "keyword_search")
 workflow.add_conditional_edges("keyword_search", continue_check_contract_belong)
 workflow.add_edge("check_contract_belong", "advanced_filter_contracts")
 workflow.add_edge("advanced_filter_contracts", "advanced_year_filter")
-workflow.add_conditional_edges("advanced_year_filter",routing_function, {"END": "generate_response", "NEXT": "advanced_equipment_filter"})
-workflow.add_conditional_edges("advanced_year_filter", advanced_equipment_filter)
+workflow.add_conditional_edges("advanced_year_filter",routing_function, {"END": "generate_response", "NEXT": "has_enough_contract_filter_equipment"})
+workflow.add_edge("has_enough_contract_filter_equipment", "dispatch_equipment_node")
+workflow.add_conditional_edges("dispatch_equipment_node",send_equipment_filter)
 workflow.add_edge("equipment_choice", "generate_response")
 workflow.add_edge("generate_response", END)
 
@@ -378,7 +394,7 @@ graph = workflow.compile()
 
 if __name__ == "__main__":
     # 测试用例
-    query = "余热锅炉近三年的采购价格。"
+    query = "余热锅炉近一年的采购价格。"
     state = {"query": query,"messages":[]}
     result = graph.invoke(state)
     print(result)
