@@ -1,7 +1,8 @@
 import asyncio
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from langchain.output_parsers import PydanticOutputParser
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from pydantic import BaseModel, Field
 from typing import List
 from enum import Enum
@@ -15,19 +16,11 @@ load_dotenv()
 
 api_key = os.getenv("QWEN_API_KEY")
 base_url = os.getenv("SELF_HOST_URL")
-model_name = "qwen-plus-latest"
+# model_name = "qwen-plus-latest"
 model_name = "Qwen3-235B"
 # Initialize Tavily client
 tavily_api_key = os.getenv('TAVILY_API_KEY')
 tavily_client = TavilyClient(api_key=tavily_api_key)
-
-# Initialize the LLM
-llm = ChatOpenAI(
-    model=model_name,
-    api_key=api_key,
-    base_url=base_url,
-    temperature=0.01
-)
 
 # Define Pydantic Models
 class Standard(BaseModel):
@@ -86,8 +79,6 @@ standard_prompt = """no_think,# 提取标准名称和标准号的提示词
    - 所有输出均使用中文，表格格式清晰，易于阅读。
    - 如果标准名称或编号不完整（如缺少编号），编号字段留空：""。
 5. 仔细审查文档，严格禁止遗漏任何可能出现的标准信息。
-{format_instructions}
-{query}
 """
 
 standard_check_prompt = """no_think,你是一个专业的标准检测分析助手，任务是识别提供的国家标准（GB）和行业标准（如JB、QB等）是否过期以及有效，根据提供的标准号、标准名称，并验证标准名称与标准号是否匹配。
@@ -112,28 +103,17 @@ standard_check_prompt = """no_think,你是一个专业的标准检测分析助�
 状态（有效/废止/待实施/无法判断）
 名称与标号是否匹配（是/否）
 原因（判断的依据和理由）
-{format_instructions}
-\n
-{web_search_content}
-\n
-{query}
 """
-
-# Initialize Parsers
-extract_parser = PydanticOutputParser(pydantic_object=StandardList)
-check_parser = PydanticOutputParser(pydantic_object=StandardCheck)
 
 # Define PromptTemplates
 extract_prompt = PromptTemplate(
     template=standard_prompt,
     input_variables=["query"],
-    partial_variables={"format_instructions": extract_parser.get_format_instructions()},
 )
 
 check_prompt = PromptTemplate(
     template=standard_check_prompt,
     input_variables=["query"],
-    partial_variables={"format_instructions": check_parser.get_format_instructions()},
 )
 
 async def tavily_search(query: str):
@@ -151,36 +131,40 @@ async def tavily_search(query: str):
     }
 
 # Define Async Node Functions
-async def extract_standards(state: GraphState) -> GraphState:
+def extract_standards(state: GraphState) -> GraphState:
     """Extract standards from input text asynchronously."""
     input_text = state["input_text"]
-    chain = extract_prompt | llm | extract_parser
-    result = await chain.ainvoke({"query": input_text})
-    return {"extracted_standards": result, "check_results": state.get("check_results", [])}
+    # Initialize the LLM
+    model = ChatOpenAI(model=model_name,api_key=api_key,base_url=base_url,temperature=0)
+    agent = create_agent(
+        model=model,
+        tools=[],
+        response_format=ToolStrategy(StandardList)
+    )
 
-def route_tools(state:GraphState):
-    if isinstance(state, list):
-        ai_message = state[-1]
-    elif messages := state.get("messages", []):
-        ai_message = messages[-1]
-    if hasattr(ai_message,'tool_calls') and len(ai_message.tool_calls) > 0:
-        return "call_tool"
-    else:
-        return END
+    result = agent.invoke({"messages":[{"role":"system","content":standard_prompt},{"role":"user","content":input_text}]})
+    extracted_standards = result["structured_response"]
+    return {"extracted_standards": extracted_standards, "check_results": state.get("check_results", [])}
 
-async def check_single_standard(standard, chain, semaphore):
+async def check_single_standard(standard, agent, semaphore):
     """Check a single standard with semaphore to limit concurrency."""
     async with semaphore:
         query = f"name:{standard.name},code:{standard.code}"
         web_search_result = await tavily_search(f"标准号:{standard.code} 当前是否有效")
-        result = await chain.ainvoke({"query": query,"web_search_content": web_search_result})
+        model = ChatOpenAI(model=model_name,api_key=api_key,base_url=base_url,temperature=0)
+        agent = create_agent(
+        model=model,
+        tools=[],
+        response_format=ToolStrategy(StandardCheck)
+    )
+        result = agent.invoke({"messages":[{"role":"system","content":standard_check_prompt},{"role":"user","content":f"查询到的相关资料：{web_search_result}，当前待检测标准：{query}，检查和判断是否有效？"}]})
         return result
 
-async def check_standards_async(standards, chain):
+async def check_standards_async(standards, agent):
     """Process standards concurrently with a maximum concurrency of 5."""
     semaphore = asyncio.Semaphore(5)  # Limit to 5 concurrent tasks
     tasks = [
-        check_single_standard(standard, chain, semaphore)
+        check_single_standard(standard, agent, semaphore)
         for standard in standards
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -189,14 +173,13 @@ async def check_standards_async(standards, chain):
 async def check_standards(state: GraphState) -> GraphState:
     """Check each extracted standard for validity and matching with max concurrency of 5."""
     standards = state["extracted_standards"].standards
-    # llm = ChatOpenAI(
-    #     model='deepseek-chat',
-    #     api_key=os.getenv("DEEPSEEK_API_KEY"),
-    #     base_url=os.getenv("DEEPSEEK_API_BASE_URL"),
-    #     temperature=0.01
-    # )
-    chain = check_prompt | llm | check_parser
-    check_results = await check_standards_async(standards, chain)
+    model = ChatOpenAI(model=model_name,api_key=api_key,base_url=base_url,temperature=0)
+    agent = create_agent(
+        model=model,
+        tools=[],
+        response_format=ToolStrategy(StandardList)
+    )
+    check_results = await check_standards_async(standards, agent)
     return {"check_results": check_results}
 
 # Define the Workflow
@@ -215,3 +198,12 @@ workflow.set_entry_point("extract_standards")
 
 # Compile the graph for async execution
 graph = workflow.compile()
+
+# 异步调用
+async def main():
+    state = {'input_text':"5）施布置合理、操作安全、简便，尽量减小项目实施时对现有单元生产的影响；6）严格执行国家、地方及企业的有关环保、安全卫生、节能、工程设计统一技术规定等有关标准、规范。7）执行的设计规范：《中华人民共和国环境保护法》（2015年1月1日起施行）《建设项目环境保护管理条例》（1998年11月29日发布施行）《钢铁工业环境保护设计规范》（GB50406-2007）《钢铁烧结、球团工业大气污染物排放标准》（GB28662-2012）《建筑地基基础设计规范》（GB50007-2011）《建筑结构荷载规范》 （GB 50009-2012）《混凝土结构设计规范》（GB50010-2010）《钢结构设计规范》（GB50017-2003）《砌体结构设计规范》（GB50003-2011）。《建筑抗震设计规范》（GB50011-2010）。《建筑工程抗震设防分类标准》（GB50223－2008）。《动力机器基础设计规范》（GB50040-96）。《烟囱设计规范》（GB50051-2013）。《建筑桩基技术规范》（JGJ94-2008）。《岩土工程勘察规范》GB 50021-2001 （2009年版）。《通用用电设备配电设计规范》   GB50055-2011《建筑物防雷设计规范》     GB50057-2010《建筑设计防火规范》       GB50016-2014 《3～110KV高压配电装置设计规范》   GB50060-2008《供配电系统设计规范》     GB50052-2009《低压配电设计规范》       GB50054-2011《20kV及以下变电所设计规程》GB50053-2013"}
+    result = await graph.ainvoke(state)
+    print(result['check_results'])
+
+if __name__ == '__main__':
+    asyncio.run(main())
