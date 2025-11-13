@@ -1,13 +1,14 @@
 import datetime
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Send,Command
+from langgraph.types import Send, Command
 from langgraph.config import get_stream_writer
-from typing import TypedDict,Annotated,List,Optional,Any
+from typing import TypedDict, Annotated, List, Optional, Any
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import HumanMessage,SystemMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 import os
-from pydantic import BaseModel,Field
-from langchain.output_parsers import PydanticOutputParser
+from pydantic import BaseModel, Field
+from langchain.agents import create_agent
+from langchain.agents.structured_output import ToolStrategy
 from openai import OpenAI
 import lancedb
 import pandas as pd
@@ -26,7 +27,7 @@ load_dotenv()
 qwen_api_key = os.getenv("QWEN_API_KEY")
 qwen_base_url = os.getenv("QWEN_API_BASE_URL")
 contract_db_path = os.getenv("CONTRACT_DB_PATH")
-MODEL_NAME = "qwen-plus"
+MODEL_NAME = "qwen3-max"
 
 def get_embedding(text,model='text-embedding-v4',dimensions=2048):
     client = OpenAI(
@@ -88,10 +89,12 @@ class State(TypedDict):
 def generate_search_words(state: State) -> State:
     try:
       logging.info(f"generate_search_words,开始进行合同处理：收到用户请求数据：{state}")
-      llm = ChatOpenAI(model=MODEL_NAME,api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-      llm_with_structured_output = llm.with_structured_output(SearchKeyWords).with_retry(stop_after_attempt=3)
-      parser = PydanticOutputParser(pydantic_object=SearchKeyWords)
-      format_instructions = parser.get_format_instructions()
+      model = ChatOpenAI(model=MODEL_NAME, api_key=qwen_api_key, base_url=qwen_base_url, temperature=0.01)
+      agent = create_agent(
+            model=model,
+            tools=[],
+            response_format=ToolStrategy(SearchKeyWords)
+            )
       system_prompt = dedent(f"""你是一个合同查询助手，负责拆解用户查询需求中的关键字。关键字分为两类：
                             1.  **合同元信息关键字**：如项目名称、供应商、工程子项等非设备信息。
                             2.  **设备关键字**：如风机、锅炉、泵等设备信息。
@@ -126,9 +129,16 @@ def generate_search_words(state: State) -> State:
                             第一步执行非设备类查询分析步骤分析：用户的提到了金通灵科技，这属于某个公司的名称，可能属于供应商，用户可能是想要查询该供应商涉及到的合同，供应商属于合同元信息，因此判断为非设备类查询，查询关键字：[金通灵科技]；
                             第二步执行设备类查询分析步骤：用户提问没有涉及到设备信息，因此不属于设备类查询，提取设备关键字：null。
                             返回结果：contract_meta_info_key_words为[金通灵科技]，equipments_key_words为null。
-                            需要按照提供的json格式进行输出：\n{format_instructions}\n""")
-      logging.info(f"generate_search_words,生成合同处理系统提示：{system_prompt}")
-      response = llm_with_structured_output.invoke([SystemMessage(system_prompt),*state["messages"], HumanMessage(state["query"])])
+                            需要按照提供的json格式进行输出。""")
+
+      result = agent.invoke({
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                *state["messages"],
+                {"role": "user", "content": state["query"]}
+            ]
+      })
+      response = result["structured_response"]
       logging.info(f"generate_search_words,生成查询关键字格式化输出：{response}")
       custom_check_point_output({'type':'update_info','node':'generate_search_words','data':response})
       return {"meta_search_query_keyword": response}
@@ -199,10 +209,12 @@ def check_contract_belong(state: dict)->State:
     query = state["query"]
     contract_info = state['contract_meta']+state['equipment_table']
     try:
-        llm = ChatOpenAI(model=MODEL_NAME,api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-        llm_with_structured_output = llm.with_structured_output(CheckBelongContract).with_retry(stop_after_attempt=3)
-        parser = PydanticOutputParser(pydantic_object=CheckBelongContract)
-        format_instructions = parser.get_format_instructions()
+        model = ChatOpenAI(model=MODEL_NAME, api_key=qwen_api_key, base_url=qwen_base_url, temperature=0.01)
+        agent = create_agent(
+            model=model,
+            tools=[],
+            response_format=ToolStrategy(CheckBelongContract)
+        )
         system_prompt = dedent(f"""你是一个精确的合同查询判断机器，请根据用户提供的合同信息和用户提出的问题，判断合同是否属于用户查询范围。
                                # 分析规则
                                1.如果用户的提问需求范围在提供的合同信息中，则认为合同属于用户的查询范围，例如用户询问某个项目的合同信息，如果该合同中属于该项目，那么先进行分析，检测到存在该项目的合同信息，输出true。
@@ -217,9 +229,15 @@ def check_contract_belong(state: dict)->State:
                                reason中需要写出分析的原因，例如：合同属于该查询项目。
                                judgement中需要写出判断结果。
                                当前时间是：{datetime.datetime.now().strftime('%Y-%m-%d')}。
-                               需要按照提供的json格式进行输出：\n{format_instructions}\n""")
-        response:CheckBelongContract = llm_with_structured_output.invoke([SystemMessage(system_prompt), HumanMessage(f"用户提供的合同信息：{contract_info},\n用户提出的问题：{query}")])
-        if response.judgement is True:
+                               需要按照提供的json格式进行输出。""")
+        result = agent.invoke({
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"用户提供的合同信息：{contract_info},\n用户提出的问题：{query}"}
+            ]
+        })
+        response = result["structured_response"]
+        if response['judgement'] is True:
             return {"contract_info_checked": [{"contract_meta":state['contract_meta'],"date":state['date'],"equipment_table":state['equipment_table']}]}
         else:
             return {"contract_info_checked": []}
@@ -230,10 +248,12 @@ def advanced_filter_contracts(state: State)->State:
     '''进行合同的额外过滤处理，例如查询指定的某种设备，就提取相关设备的数据，查询指定年份的就限定相关年份的数据'''
     try:
         query = state["query"]
-        llm = ChatOpenAI(model=MODEL_NAME,api_key=qwen_api_key,base_url=qwen_base_url,temperature=0.01)
-        llm_with_structured_output = llm.with_structured_output(AdvancedSearchConditions).with_retry(stop_after_attempt=3)
-        parser = PydanticOutputParser(pydantic_object=AdvancedSearchConditions)
-        format_instructions = parser.get_format_instructions()
+        model = ChatOpenAI(model=MODEL_NAME, api_key=qwen_api_key, base_url=qwen_base_url, temperature=0.01)
+        agent = create_agent(
+            model=model,
+            tools=[],
+            response_format=ToolStrategy(AdvancedSearchConditions)
+        )
         system_prompt = dedent(f"""你是一位经验丰富的合同分析师，根据用户提出的问题，分析是否需要进一步执行合同筛选。
                                执行进一步筛选的条件类型目前有两种：
                                1.按年份筛选：用户明确要求需要执行的年份范围的筛选
@@ -245,8 +265,15 @@ def advanced_filter_contracts(state: State)->State:
                                示例1：假如已经提供的设备关键字有：风机、余热锅炉，equipment=[风机、余热锅炉]，equipment_condition="partial"
                                示例2：假如未提供设备关键字，但是用户的提问没有明确说不需要查询设备信息，那么需要查询全部设备：equipment=None,equipment_condition="all"
                                示例3：假如未提供设备关键字，但是用户的提问明确说只需要指定信息，例如供应商、合同金额等，那么不需要查询设备信息：equipment=None,equipment_condition=None
-                               请根据以下条件进行筛选，按照提供的json格式进行输出：\n{format_instructions}\n当前时间是：{datetime.datetime.now().strftime('%Y-%m-%d')}。""")
-        response:AdvancedSearchConditions = llm_with_structured_output.invoke([SystemMessage(system_prompt),*state["messages"], HumanMessage(query)])
+                               请根据以下条件进行筛选，按照提供的json格式进行输出。当前时间是：{datetime.datetime.now().strftime('%Y-%m-%d')}。""")
+        result = agent.invoke({
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                *state["messages"],
+                {"role": "user", "content": query}
+            ]
+        })
+        response = result["structured_response"]
         logging.info(f"advanced_filter_contracts,高级过滤条件：{response}")
         return {"need_equipment_condition": False if response.equipment_condition is None else True,"need_year_condition": False if response.year is None else True,"advanced_filter_conditions":response}
     except Exception as e:
