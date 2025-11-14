@@ -15,9 +15,9 @@ app.include_router(contract.router,prefix="/llm/contract")
 app.include_router(tech_report.router,prefix="/llm/tech_report")
 app.include_router(contract_checker.router,prefix="/llm/contract_checker")
 
-@app.get("/")
-def read_root():
-    return {"Hello": "/llm/contract_checker"}
+@app.get("/health")
+def health_check():
+    return {"status": "heathy"}
 
 
 @app.get("/items/{item_id}")
