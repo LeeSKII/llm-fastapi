@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from ...utils.report_utils import post_report_with_llm
+from ....utils.report_utils import post_report_with_llm
 
 router = APIRouter()
 
