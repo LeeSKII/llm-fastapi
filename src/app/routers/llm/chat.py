@@ -4,10 +4,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import MessagesState
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage,AnyMessage
-from langgraph.graph.message import add_messages
 import os
 import logging
-from typing import AsyncGenerator, Literal
+from typing import AsyncGenerator, Literal,TypedDict
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 import json
@@ -23,10 +22,13 @@ model_name = "Qwen3-235B"
 
 llm = ChatOpenAI(model=model_name, api_key=api_key, base_url=base_url, temperature=0.01)
 
+class Message(TypedDict):
+    role: Literal["user", "assistant"]
+    content:str
 
 # 定义状态类
 class ChatState(MessagesState):
-    messages: list[AnyMessage]
+    messages: list[Message]
 
 def assistant_node(state: ChatState) -> ChatState:
     """助手响应"""
@@ -49,12 +51,12 @@ app = workflow.compile()
 
 # 测试接口
 @router.get("/",tags=["chat"])
-async def run_workflow(input_data: dict):
+async def run_workflow():
     return {"result":"chat"}
 
 # LLM value传输
 @router.post("/messages",tags=["chat"])
-async def run_workflow(input_data: dict):
+async def run_workflow(input_data: ChatState):
     messages = input_data.get("messages", "")  
     if not messages:
         return {"result": "Messages is empty"}
