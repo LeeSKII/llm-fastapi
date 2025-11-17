@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from .core.config import settings
 from .routers import api
+from .core.lifespan import lifespan
 
-app = FastAPI(lifespan=settings['LIFESPAN'])
+app = FastAPI(lifespan=lifespan)
 
 app.include_router(api.api_router)

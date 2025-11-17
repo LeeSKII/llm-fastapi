@@ -1,5 +1,4 @@
 from ...utils import logger
-from ..scheduler.start import lifespan
 from typing import TypedDict
 from dotenv import load_dotenv
 import os
@@ -33,12 +32,11 @@ def get_settings() -> Settings:
         "MYSQL_PORT": int(os.getenv("MYSQL_PORT", 3306)),
         "MYSQL_USER": os.getenv("MYSQL_USER", "root"),
         "MYSQL_PASSWORD": os.getenv("MYSQL_PASSWORD", ""),
+        "MYSQL_CHARSET": os.getenv("MYSQL_CHARSET", "utf8mb4"),
         "MYSQL_DB": os.getenv("MYSQL_DB", ""),
         "MYSQL_POOL_MINSIZE": int(os.getenv("MYSQL_POOL_MINSIZE", "2")),
         "MYSQL_POOL_MAXSIZE": int(os.getenv("MYSQL_POOL_MAXSIZE", "10")),
         "MYSQL_POOL_RECYCLE": int(os.getenv("MYSQL_POOL_RECYCLE", "3600")),
-        
-        "LIFESPAN": lifespan
     }
 
 settings = get_settings()
