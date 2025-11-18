@@ -31,7 +31,7 @@ class DMPool:
                 
                 self._initialized = True
                 logging.info("✅ 达梦数据库连接池创建成功")
-                logging.info(f"📊 连接池配置: min={settings['DM_POOL_MINSIZE']}, max={settings['DM_POOL_MAXSIZE']}")
+                logging.info(f"📊 达梦连接池配置: min={settings['DM_POOL_MINSIZE']}, max={settings['DM_POOL_MAXSIZE']}")
                 
             except Exception as e:
                 logging.error(f"❌ 创建达梦数据库连接池失败: {e}")

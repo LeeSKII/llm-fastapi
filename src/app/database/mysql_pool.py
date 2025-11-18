@@ -25,7 +25,7 @@ class MySQLPool:
                 pool_recycle=settings["MYSQL_POOL_RECYCLE"],
             )
             logging.info("✅ MySQL连接池创建成功")
-            logging.info(f"📊 连接池配置: min={settings['MYSQL_POOL_MINSIZE']}, max={settings['MYSQL_POOL_MAXSIZE']}")
+            logging.info(f"📊 MySQL连接池配置: min={settings['MYSQL_POOL_MINSIZE']}, max={settings['MYSQL_POOL_MAXSIZE']}")
         except Exception as e:
             logging.error(f"❌ 创建MySQL连接池失败: {e}")
             raise

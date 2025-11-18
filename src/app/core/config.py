@@ -30,10 +30,6 @@ class Settings(TypedDict):
     DM_POOL_MAXSIZE: int = 10
     DM_POOL_RECYCLE: int = 3600  # 连接回收时间(秒)
     
-    # 连接池配置
-    DB_POOL_MINSIZE: int = 1
-    DB_POOL_MAXSIZE: int = 20
-    DB_POOL_RECYCLE: int = 3600  # 连接回收时间(秒)
 
 def get_settings() -> Settings:
     return {
