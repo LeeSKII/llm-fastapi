@@ -8,6 +8,7 @@ dependencies = [
     "agno>=1.6.4",
     "aiomysql>=0.3.2",
     "apscheduler>=3.11.0",
+    "dmpython>=2.5.26",
     "fastapi>=0.115.13",
     "lancedb>=0.24.2",
     "langchain>=1.0.2",

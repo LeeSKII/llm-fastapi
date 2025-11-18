@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
-from ..database.mysql_pool import mysql_pool
+from ..database.db_manager import db_manager
 from ..scheduler import create_scheduler, start_scheduler, shutdown_scheduler
 
 import logging
@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
         scheduler = create_scheduler()
         start_scheduler(scheduler)
 
-        await mysql_pool.create_pool()  # 创建 MySQL 连接池
+        await db_manager.initialize_all()  # 初始化所有数据库连接池
         
         logging.info("✅ 应用启动完成")
         
@@ -30,5 +30,5 @@ async def lifespan(app: FastAPI):
         raise
     
     finally:
-        await mysql_pool.close_pool()  # 关闭 MySQL 连接池
+        await db_manager.close_all()  # 关闭所有数据库连接池
         logging.info("✅ 应用已关闭")

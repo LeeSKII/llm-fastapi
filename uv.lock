@@ -191,6 +191,21 @@ wheels = [
 ]
 
 [[package]]
+name = "dmpython"
+version = "2.5.26"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/2b/59a5b8d4e34f85c7f2c752708babdb49776d147ff8d53b0a7d459fed516a/dmpython-2.5.26-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:68f5cfaeaf03683d337e6916e00b41f2a422b41794a2719a84d36563af656903", size = 5253690, upload-time = "2025-11-17T07:29:35.402Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/4d/ad485170549eabfb1a95ecc832267f1c5a6a831dab67958f7834b663ad6d/dmpython-2.5.26-cp312-cp312-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:d43d4342ede77473fe66c75a2db8b3aa9da5cbdf3ded905c4246d03d75001c54", size = 6865458, upload-time = "2025-11-17T07:29:44.207Z" },
+    { url = "https://files.pythonhosted.org/packages/1f/04/a10fecc11c121cebc44c98f00889772805b97f62796616d5c8d90a28ba26/dmpython-2.5.26-cp312-cp312-win_amd64.whl", hash = "sha256:77f0c2bd8d73baa021df0f88010f9ad82da533cf7a5a280baf875854f164cb01", size = 7616466, upload-time = "2025-11-17T06:26:50.417Z" },
+    { url = "https://files.pythonhosted.org/packages/8c/2a/b162c2e7ae5941a3edf01009e65e2440f27f638c45d73c3b02a915ee683d/dmpython-2.5.26-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:cee03ce0314181d72bdc0949a490aaad8e289614b1db6c2c39bf672c9735a1cb", size = 5248208, upload-time = "2025-11-17T07:29:51.257Z" },
+    { url = "https://files.pythonhosted.org/packages/26/f5/1681c2debc020cc15fcad0355e06d129e1f974dede595df058d33bd54bff/dmpython-2.5.26-cp313-cp313-manylinux_2_12_x86_64.manylinux2010_x86_64.whl", hash = "sha256:77667bc9474311b1b48c3005d4bd7f94f45ceecd130639f9082d1e82bf530ee3", size = 6855672, upload-time = "2025-11-17T07:29:59.767Z" },
+    { url = "https://files.pythonhosted.org/packages/54/87/60522aef32a895335ea55efbea7efafaa1da9d416fbf0eba6480ccd831e6/dmpython-2.5.26-cp313-cp313-win_amd64.whl", hash = "sha256:2a649eea1aee789fc50cb03d341b2745523a6da542028f4f0d6a3d207b0c88d5", size = 7616453, upload-time = "2025-11-17T06:27:00.102Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/88/88f7053cb6a3e2bd1cd511af997c0d0d255d3cee64b3aa768c00f7263a5e/dmpython-2.5.26-cp314-cp314-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:57ab80a4f40669a97d7352082aafbd36717fdb5896b65b7b12fb48b300dc3206", size = 5249733, upload-time = "2025-11-17T07:30:06.63Z" },
+    { url = "https://files.pythonhosted.org/packages/ec/cb/53709de9176729207da4f2c74026f44de709111099296a7b15d5a95322fd/dmpython-2.5.26-cp314-cp314-win_amd64.whl", hash = "sha256:4b58a3437f25de0e73504e5364a51b00c808716fd5199409de61998107f146bb", size = 8576144, upload-time = "2025-11-17T06:27:11.13Z" },
+]
+
+[[package]]
 name = "docstring-parser"
 version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
@@ -583,6 +598,7 @@ dependencies = [
     { name = "agno" },
     { name = "aiomysql" },
     { name = "apscheduler" },
+    { name = "dmpython" },
     { name = "fastapi" },
     { name = "lancedb" },
     { name = "langchain" },
@@ -600,6 +616,7 @@ requires-dist = [
     { name = "agno", specifier = ">=1.6.4" },
     { name = "aiomysql", specifier = ">=0.3.2" },
     { name = "apscheduler", specifier = ">=3.11.0" },
+    { name = "dmpython", specifier = ">=2.5.26" },
     { name = "fastapi", specifier = ">=0.115.13" },
     { name = "lancedb", specifier = ">=0.24.2" },
     { name = "langchain", specifier = ">=1.0.2" },
