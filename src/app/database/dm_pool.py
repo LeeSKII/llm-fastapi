@@ -11,31 +11,43 @@ class DMPool:
         self.pool: Optional[asyncio.Queue] = None
         self.semaphore: Optional[asyncio.Semaphore] = None
         self._initialized = False
+        self._init_error: Optional[str] = None
         self._lock = asyncio.Lock()
     
-    async def create_pool(self):
-        """创建达梦数据库连接池"""
+    async def create_pool(self) -> bool:
+        """
+        创建达梦数据库连接池
+        返回: True表示成功，False表示失败
+        """
         async with self._lock:
             if self._initialized:
-                return
-                
+                return True
+
             try:
                 # 创建连接队列和信号量
                 self.pool = asyncio.Queue(maxsize=settings["DM_POOL_MAXSIZE"])
                 self.semaphore = asyncio.Semaphore(settings["DM_POOL_MAXSIZE"])
-                
+
                 # 预创建最小连接数
                 for _ in range(settings["DM_POOL_MINSIZE"]):
                     conn = await self._create_connection()
                     await self.pool.put(conn)
-                
+
                 self._initialized = True
+                self._init_error = None
                 logging.info("✅ 达梦数据库连接池创建成功")
                 logging.info(f"📊 达梦连接池配置: min={settings['DM_POOL_MINSIZE']}, max={settings['DM_POOL_MAXSIZE']}")
-                
+                return True
+
             except Exception as e:
-                logging.error(f"❌ 创建达梦数据库连接池失败: {e}")
-                raise
+                self._initialized = False
+                self._init_error = str(e)
+                logging.warning(f"⚠️ 创建达梦数据库连接池失败，服务将以降级模式运行: {e}")
+                return False
+
+    def get_init_error(self) -> Optional[str]:
+        """获取初始化错误信息"""
+        return self._init_error
     
     async def _create_connection(self) -> dmPython.connect:
         """创建单个数据库连接"""
