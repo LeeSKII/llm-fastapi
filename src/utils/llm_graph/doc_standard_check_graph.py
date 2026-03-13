@@ -15,9 +15,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 api_key = os.getenv("QWEN_API_KEY")
-base_url = os.getenv("SELF_HOST_URL")
-# model_name = "qwen-plus-latest"
-model_name = "Qwen3-235B"
+base_url = os.getenv("QWEN_API_BASE_URL")
+model_name = "qwen-flash"
+# model_name = "Qwen3-235B"
 # Initialize Tavily client
 tavily_api_key = os.getenv('TAVILY_API_KEY')
 tavily_client = TavilyClient(api_key=tavily_api_key)
@@ -50,7 +50,7 @@ class GraphState(TypedDict):
     check_results: List[StandardCheck]
 
 # Define Prompts
-standard_prompt = """no_think,# 提取标准名称和标准号的提示词
+standard_prompt = """# 提取标准名称和标准号的提示词
 
 ## 任务描述
 你是一位专业的文档分析师，负责从用户提供的中文文章或文本中提取标准名称和标准号，并以给定的json schema格式输出。目标是准确识别所有提到的标准（包括国家标准、法规、行业标准等），提取其名称（不含引号）和编号（或发布/施行日期），并确保输出清晰、格式统一，适配structure_output模式。
@@ -81,7 +81,7 @@ standard_prompt = """no_think,# 提取标准名称和标准号的提示词
 5. 仔细审查文档，严格禁止遗漏任何可能出现的标准信息。
 """
 
-standard_check_prompt = """no_think,你是一个专业的标准检测分析助手，任务是识别提供的国家标准（GB）和行业标准（如JB、QB等）是否过期以及有效，根据提供的标准号、标准名称，并验证标准名称与标准号是否匹配。
+standard_check_prompt = """你是一个专业的标准检测分析助手，任务是识别提供的国家标准（GB）和行业标准（如JB、QB等）是否过期以及有效，根据提供的标准号、标准名称，并验证标准名称与标准号是否匹配。
 你可以使用提供的Tavily搜索工具来查询标准的有效性状态，优先使用搜索结果中的'answer'字段提供的信息。
 以下是具体要求：
 输入内容：接收包含标准号（如GB 12345-2018、JB/T 7890-2015等）、标准名称以及可能的发布日期文本。
@@ -201,7 +201,8 @@ graph = workflow.compile()
 
 # 异步调用
 async def main():
-    state = {'input_text':"5）施布置合理、操作安全、简便，尽量减小项目实施时对现有单元生产的影响；6）严格执行国家、地方及企业的有关环保、安全卫生、节能、工程设计统一技术规定等有关标准、规范。7）执行的设计规范：《中华人民共和国环境保护法》（2015年1月1日起施行）《建设项目环境保护管理条例》（1998年11月29日发布施行）《钢铁工业环境保护设计规范》（GB50406-2007）《钢铁烧结、球团工业大气污染物排放标准》（GB28662-2012）《建筑地基基础设计规范》（GB50007-2011）《建筑结构荷载规范》 （GB 50009-2012）《混凝土结构设计规范》（GB50010-2010）《钢结构设计规范》（GB50017-2003）《砌体结构设计规范》（GB50003-2011）。《建筑抗震设计规范》（GB50011-2010）。《建筑工程抗震设防分类标准》（GB50223－2008）。《动力机器基础设计规范》（GB50040-96）。《烟囱设计规范》（GB50051-2013）。《建筑桩基技术规范》（JGJ94-2008）。《岩土工程勘察规范》GB 50021-2001 （2009年版）。《通用用电设备配电设计规范》   GB50055-2011《建筑物防雷设计规范》     GB50057-2010《建筑设计防火规范》       GB50016-2014 《3～110KV高压配电装置设计规范》   GB50060-2008《供配电系统设计规范》     GB50052-2009《低压配电设计规范》       GB50054-2011《20kV及以下变电所设计规程》GB50053-2013"}
+    state = {'input_text':"""名称	编号	编制单位	发布机关	出版单位	执行日期	类 别
+城镇供热网设计标准	CJJ/T 34-2022		中华人民共和国住房和城乡建设部	中国计划出版社	2022.8.1	CJJ/T"""}
     result = await graph.ainvoke(state)
     print(result['check_results'])
 

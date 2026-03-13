@@ -27,7 +27,7 @@ load_dotenv()
 qwen_api_key = os.getenv("QWEN_API_KEY")
 qwen_base_url = os.getenv("QWEN_API_BASE_URL")
 contract_db_path = os.getenv("CONTRACT_DB_PATH")
-MODEL_NAME = "qwen3-max"
+MODEL_NAME = "qwen-flash"
 
 def get_embedding(text,model='text-embedding-v4',dimensions=2048):
     client = OpenAI(
