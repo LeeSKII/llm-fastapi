@@ -2,7 +2,7 @@ from typing import Union
 
 from fastapi import APIRouter
 
-from .llm import doc, chat, translate, contract, tech_report, contract_checker
+from .llm import doc, chat, translate, contract, tech_report, contract_checker,contract_search
 from .common import yus,edb
 
 api_router = APIRouter()
@@ -11,6 +11,7 @@ api_router.include_router(doc.router, prefix="/llm/doc")
 api_router.include_router(chat.router, prefix="/llm/chat")
 api_router.include_router(translate.router, prefix="/llm/translate")
 api_router.include_router(contract.router, prefix="/llm/contract")
+api_router.include_router(contract_search.router, prefix="/llm/contract_search")
 api_router.include_router(tech_report.router, prefix="/llm/tech_report")
 api_router.include_router(contract_checker.router, prefix="/llm/contract_checker")
 

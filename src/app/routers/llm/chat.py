@@ -16,14 +16,18 @@ router = APIRouter()
 from dotenv import load_dotenv
 load_dotenv()
 
+# api_key = os.getenv("QWEN_API_KEY")
+# base_url = os.getenv("SELF_HOST_URL")
+# model_name = "Qwen3-235B"
+
 api_key = os.getenv("QWEN_API_KEY")
-base_url = os.getenv("SELF_HOST_URL")
-model_name = "Qwen3-235B"
+base_url = os.getenv("QWEN_API_BASE_URL")
+model_name = "qwen-flash"
 
 llm = ChatOpenAI(model=model_name, api_key=api_key, base_url=base_url, temperature=0.01)
 
 class Message(TypedDict):
-    role: Literal["user", "assistant"]
+    role: Literal["user", "assistant", "system"]
     content:str
 
 # 定义状态类
@@ -65,7 +69,7 @@ async def run_workflow(input_data: ChatState):
 
 # LLM stream传输
 @router.post("/stream", tags=["chat"])
-async def run_workflow(input_data: dict):
+async def run_workflow(input_data: ChatState):
     messages = input_data.get("messages", [])
     
     if not messages:
